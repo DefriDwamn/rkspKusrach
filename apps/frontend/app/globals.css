@@ -1,0 +1,84 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #f7fafc 0%, #eef3f9 100%);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: #102033;
+}
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+h1 {
+  margin-bottom: 0.5rem;
+}
+
+.chat-shell {
+  background: #ffffff;
+  border: 1px solid #d9e3ef;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(16, 32, 51, 0.08);
+  padding: 1rem;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.message {
+  border-radius: 12px;
+  padding: 0.75rem;
+  line-height: 1.4;
+}
+
+.message.user {
+  background: #e7f0fb;
+  border: 1px solid #b6d1f1;
+}
+
+.message.assistant {
+  background: #eefcf0;
+  border: 1px solid #bfe6c4;
+}
+
+form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+textarea {
+  min-height: 90px;
+  padding: 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #c4d3e5;
+  resize: vertical;
+}
+
+button {
+  justify-self: start;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  background: #0f4aa1;
+  color: #fff;
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.65;
+}
+
+.citations {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
