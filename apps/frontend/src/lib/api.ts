@@ -1,4 +1,5 @@
-import type { ChatRequest, ChatResponse } from "@rksp/shared";
+import type { ChatHistoryResponse, ChatRequest, ChatResponse } from "@rksp/shared";
+import { chatHistoryResponseSchema } from "@rksp/shared";
 
 function resolveApiUrl(): string {
   if (process.env.NEXT_PUBLIC_API_URL) {
@@ -26,4 +27,20 @@ export async function sendChatMessage(payload: ChatRequest): Promise<ChatRespons
   }
 
   return (await response.json()) as ChatResponse;
+}
+
+export async function fetchChatHistory(sessionId: string): Promise<ChatHistoryResponse> {
+  const response = await fetch(`${resolveApiUrl()}/api/chat/history/${encodeURIComponent(sessionId)}`);
+
+  if (!response.ok) {
+    throw new Error(`History request failed: ${response.status}`);
+  }
+
+  const data: unknown = await response.json();
+  const parsed = chatHistoryResponseSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error("Invalid history response");
+  }
+
+  return parsed.data;
 }

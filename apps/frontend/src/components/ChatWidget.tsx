@@ -1,13 +1,29 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 import type { ChatMessage } from "@rksp/shared";
-import { sendChatMessage } from "../lib/api.js";
+import { fetchChatHistory, sendChatMessage } from "../lib/api.js";
 
-const SESSION_ID = "demo-session";
+const SESSION_STORAGE_KEY = "rksp-chat-session-id";
+
+function resolveSessionId(): string {
+  if (typeof window === "undefined") {
+    return "server-session";
+  }
+
+  const existing = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  if (existing) {
+    return existing;
+  }
+
+  const next = window.crypto.randomUUID();
+  window.localStorage.setItem(SESSION_STORAGE_KEY, next);
+  return next;
+}
 
 export function ChatWidget() {
+  const [sessionId, setSessionId] = useState<string>("server-session");
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [lastCitations, setLastCitations] = useState<
@@ -15,6 +31,17 @@ export function ChatWidget() {
   >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const nextSessionId = resolveSessionId();
+    setSessionId(nextSessionId);
+
+    void fetchChatHistory(nextSessionId)
+      .then((history) => setMessages(history.messages))
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : "Unknown error");
+      });
+  }, []);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -31,7 +58,7 @@ export function ChatWidget() {
 
     try {
       const response = await sendChatMessage({
-        sessionId: SESSION_ID,
+        sessionId,
         message: userMessage.content,
         history: nextMessages,
       });

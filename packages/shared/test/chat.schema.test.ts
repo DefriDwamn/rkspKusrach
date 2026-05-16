@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chatRequestSchema } from "../src/chat.js";
+import { chatHistoryResponseSchema, chatRequestSchema } from "../src/chat.js";
 
 describe("chatRequestSchema", () => {
   it("accepts valid payload", () => {
@@ -21,5 +21,19 @@ describe("chatRequestSchema", () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("chatHistoryResponseSchema", () => {
+  it("accepts valid session history payload", () => {
+    const parsed = chatHistoryResponseSchema.safeParse({
+      sessionId: "session-1",
+      messages: [
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Hi" },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
   });
 });

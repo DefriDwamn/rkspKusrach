@@ -1,10 +1,16 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 
+import { createChatSessionStore } from "./services/chat-session-store.factory.js";
 import { registerChatRoutes } from "./routes/chat.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
+  const chatSessionStore = await createChatSessionStore(app.log);
+
+  app.addHook("onClose", async () => {
+    await chatSessionStore.close();
+  });
 
   await app.register(cors, {
     origin: (origin, callback) => {
@@ -33,7 +39,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   app.get("/health", async () => ({ status: "ok" }));
-  await registerChatRoutes(app);
+  await registerChatRoutes(app, { chatSessionStore });
 
   return app;
 }

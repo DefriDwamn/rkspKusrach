@@ -36,6 +36,34 @@ describe("chat routes", () => {
     expect(Array.isArray(body.citations)).toBe(true);
   });
 
+  it("stores and returns session history", async () => {
+    const sessionId = "history-session";
+
+    const chatResponse = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: {
+        sessionId,
+        message: "Где найти инструкцию по VPN?",
+      },
+    });
+
+    expect(chatResponse.statusCode).toBe(200);
+
+    const historyResponse = await app.inject({
+      method: "GET",
+      url: `/api/chat/history/${sessionId}`,
+    });
+
+    expect(historyResponse.statusCode).toBe(200);
+    const historyBody = historyResponse.json();
+    expect(historyBody.sessionId).toBe(sessionId);
+    expect(Array.isArray(historyBody.messages)).toBe(true);
+    expect(historyBody.messages).toHaveLength(2);
+    expect(historyBody.messages[0].role).toBe("user");
+    expect(historyBody.messages[1].role).toBe("assistant");
+  });
+
   it("rejects invalid payload", async () => {
     const response = await app.inject({
       method: "POST",
