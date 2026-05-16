@@ -1,7 +1,7 @@
 import type { ChatHistoryResponse, ChatRequest, ChatResponse } from "@rksp/shared";
 import { chatHistoryResponseSchema } from "@rksp/shared";
 
-function resolveApiUrl(): string {
+export function resolveApiUrl(): string {
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL;
   }
