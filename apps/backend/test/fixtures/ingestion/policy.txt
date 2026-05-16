@@ -1,0 +1,5 @@
+VPN policy
+
+1. Use the company client.
+2. Rotate credentials regularly.
+3. Report connectivity issues immediately.
