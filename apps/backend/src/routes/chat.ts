@@ -11,13 +11,14 @@ import { RagService } from "../services/rag.service.js";
 
 type RegisterChatRoutesDeps = {
   chatSessionStore: ChatSessionStore;
+  ragService?: RagService;
 };
 
 export async function registerChatRoutes(
   app: FastifyInstance,
   deps: RegisterChatRoutesDeps
 ): Promise<void> {
-  const ragService = new RagService();
+  const ragService = deps.ragService ?? new RagService();
   const sessionStore = deps.chatSessionStore;
 
   app.get("/api/chat/history/:sessionId", async (request, reply) => {
