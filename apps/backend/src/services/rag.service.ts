@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { Ollama } from "ollama";
 import type { ChatRequest, ChatResponse, Citation, VectorIndex } from "@rksp/shared";
 import { vectorIndexSchema } from "@rksp/shared";
 
@@ -13,6 +14,8 @@ type RagServiceOptions = {
 };
 
 const DEFAULT_TOP_K = 3;
+const DEFAULT_MODEL = "gpt-oss:120b";
+const DEFAULT_OLLAMA_HOST = "https://ollama.com";
 
 function resolveTopK(rawValue: string | undefined, fallback: number): number {
   if (!rawValue) {
@@ -49,6 +52,10 @@ function dotProduct(left: number[], right: number[]): number {
   return total;
 }
 
+function containsCyrillic(text: string): boolean {
+  return /\p{Script=Cyrillic}/u.test(text);
+}
+
 function toCitation(entry: VectorIndex["entries"][number]): Citation {
   return {
     sourceId: entry.documentId,
@@ -57,22 +64,77 @@ function toCitation(entry: VectorIndex["entries"][number]): Citation {
   };
 }
 
-function formatAnswer(normalized: string, citations: Citation[]): string {
+function getContextExcerpt(text: string, maxLength = 1200): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.slice(0, maxLength);
+}
+
+function synthesizeAnswer(normalized: string, citations: Citation[]): string {
   if (citations.length === 0) {
     return `Черновой ответ для: "${normalized}". Релевантные фрагменты не найдены.`;
   }
 
-  const header = `Найдено ${citations.length} релевантных фрагмента(ов) для: "${normalized}".`;
-  const context = citations
-    .map((citation, index) => `${index + 1}. ${citation.title}: ${citation.snippet}`)
+  return [
+    `По запросу "${normalized}" найдено следующее:`,
+    "В найденных материалах есть релевантное описание по теме запроса.",
+    "",
+    "Кратко по найденным материалам:",
+    citations.slice(0, 3).map((citation, index) => `${index + 1}. ${citation.snippet}`).join("\n"),
+    "",
+    "Источники:",
+    citations.map((citation, index) => `${index + 1}. ${citation.title}: ${citation.snippet}`).join("\n"),
+  ].join("\n");
+}
+
+function buildModelPrompt(query: ChatRequest, citations: Citation[], fragments: VectorIndex["entries"]): string {
+  const historyBlock = query.history?.length
+    ? query.history.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join("\n")
+    : "История диалога отсутствует.";
+
+  const contextBlock = fragments
+    .map((fragment, index) => {
+      const snippet = getContextExcerpt(fragment.content, 1400);
+      return [
+        `Фрагмент ${index + 1}`,
+        `Источник: ${fragment.path}`,
+        `Текст: ${snippet}`,
+      ].join("\n");
+    })
+    .join("\n\n");
+
+  const citationBlock = citations
+    .map((citation, index) => `${index + 1}. ${citation.title} (${citation.sourceId})`)
     .join("\n");
 
-  return `${header}\nИсточники:\n${context}`;
+  return [
+    `Вопрос пользователя: ${query.message.trim()}`,
+    "",
+    "История диалога:",
+    historyBlock,
+    "",
+    "Релевантный контекст из базы знаний:",
+    contextBlock,
+    "",
+    "Справка по источникам:",
+    citationBlock,
+    "",
+    "Инструкция: ответь по-русски, кратко и по существу. Используй только приведённый контекст. Если в контексте нет прямого ответа, честно скажи, чего не хватает, и что можно уточнить.",
+  ].join("\n");
+}
+
+function buildTranslationPrompt(originalQuestion: string): string {
+  return [
+    "Translate the user's question from Russian into concise English for information retrieval.",
+    "Return only the English translation, without quotes, explanations, or extra punctuation.",
+    `Russian question: ${originalQuestion.trim()}`,
+  ].join("\n");
 }
 
 export class RagService {
   private readonly vectorIndexPath: string;
   private readonly topK: number;
+  private readonly ollamaClient: Ollama | null;
+  private readonly modelName: string;
   private cachedIndex: VectorIndex | null | undefined;
 
   constructor(options: RagServiceOptions = {}) {
@@ -83,6 +145,21 @@ export class RagService {
       options.vectorIndexPath ??
       resolveVectorIndexPath(process.env.RAG_VECTOR_INDEX_PATH, defaultIndexPath);
     this.topK = options.topK ?? resolveTopK(process.env.RAG_RETRIEVER_TOP_K, DEFAULT_TOP_K);
+    this.modelName = process.env.OLLAMA_MODEL?.trim() || DEFAULT_MODEL;
+
+    const apiKey = process.env.OLLAMA_API_KEY?.trim();
+    const host = process.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
+
+    if (apiKey) {
+      this.ollamaClient = new Ollama({
+        host,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+    } else {
+      this.ollamaClient = null;
+    }
   }
 
   private async loadIndex(): Promise<VectorIndex | null> {
@@ -111,9 +188,10 @@ export class RagService {
   async answer(query: ChatRequest): Promise<ChatResponse> {
     const normalized = query.message.trim();
     const index = await this.loadIndex();
+    const retrievalQuery = await this.translateQueryForRetrieval(normalized);
 
     if (index) {
-      const queryEmbedding = generateEmbedding(normalized, index.embeddingDimensions);
+      const queryEmbedding = await generateEmbedding(retrievalQuery, index.embeddingDimensions, "query");
       const scored = index.entries
         .map((entry) => ({ entry, score: dotProduct(queryEmbedding, entry.embedding) }))
         .filter((item) => item.score > 0)
@@ -121,8 +199,37 @@ export class RagService {
         .slice(0, this.topK);
       const citations = scored.map(({ entry }) => toCitation(entry));
 
+      if (this.ollamaClient && citations.length > 0) {
+        try {
+          const response = await this.ollamaClient.chat({
+            model: this.modelName,
+            messages: [
+              {
+                role: "system",
+                content: "Ты русскоязычный ассистент поддержки. Отвечай только на основе предоставленного контекста. Если информации недостаточно, скажи об этом прямо и не выдумывай факты.",
+              },
+              {
+                role: "user",
+                content: buildModelPrompt({ ...query, message: retrievalQuery }, citations, scored.map(({ entry }) => entry)),
+              },
+            ],
+          });
+
+          const answerText = response.message?.content?.trim() ?? "";
+          if (answerText.length > 0) {
+            return {
+              answer: answerText,
+              grounded: true,
+              citations,
+            };
+          }
+        } catch {
+          // Fall back to local synthesis when the model request fails.
+        }
+      }
+
       return {
-        answer: formatAnswer(normalized, citations),
+        answer: synthesizeAnswer(normalized, citations),
         grounded: citations.length > 0,
         citations,
       };
@@ -139,5 +246,32 @@ export class RagService {
         },
       ],
     };
+  }
+
+  private async translateQueryForRetrieval(question: string): Promise<string> {
+    if (!containsCyrillic(question) || !this.ollamaClient) {
+      return question;
+    }
+
+    try {
+      const translationResponse = await this.ollamaClient.chat({
+        model: this.modelName,
+        messages: [
+          {
+            role: "system",
+            content: "Translate Russian into concise English for retrieval. Output only the translation.",
+          },
+          {
+            role: "user",
+            content: buildTranslationPrompt(question),
+          },
+        ],
+      });
+
+      const translated = translationResponse.message?.content?.trim() ?? "";
+      return translated.length > 0 ? translated : question;
+    } catch {
+      return question;
+    }
   }
 }

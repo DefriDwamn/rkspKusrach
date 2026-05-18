@@ -17,8 +17,11 @@
   "dependencies": {
     "@fastify/cors": "^11.1.0",
     "@rksp/shared": "0.1.0",
+    "apache-arrow": "^19.0.0",
     "dotenv": "^17.2.1",
     "fastify": "^5.2.1",
+    "ollama": "^0.6.3",
+    "openai": "^6.38.0",
     "pg": "^8.16.0",
     "zod": "^3.24.4"
   },

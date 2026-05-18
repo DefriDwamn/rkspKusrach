@@ -58,7 +58,7 @@ export async function runIndexing(
   const outputPath = rawOutputPath ? resolveRelativePath(baseDir, rawOutputPath) : defaultOutputPath;
 
   const ingestionManifest = await readIngestionManifest(inputPath);
-  const vectorIndex = buildVectorIndex(ingestionManifest);
+  const vectorIndex = await buildVectorIndex(ingestionManifest);
 
   await writeVectorIndex(outputPath, vectorIndex);
 

@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import { vectorIndexSchema, type IngestionRunResult } from "@rksp/shared";
 
-import { generateEmbedding } from "../src/indexing/embedding.js";
 import { buildVectorIndex, writeVectorIndex } from "../src/indexing/vector-index.js";
 
 const sampleIngestion: IngestionRunResult = {
@@ -33,8 +32,8 @@ const sampleIngestion: IngestionRunResult = {
 };
 
 describe("indexing pipeline", () => {
-  it("builds a vector index with embeddings", () => {
-    const index = buildVectorIndex(sampleIngestion, 8);
+  it("builds a vector index with embeddings", async () => {
+    const index = await buildVectorIndex(sampleIngestion, 8);
 
     expect(index.sourceDir).toBe(sampleIngestion.sourceDir);
     expect(index.embeddingDimensions).toBe(8);
@@ -43,8 +42,8 @@ describe("indexing pipeline", () => {
     expect(index.entries[0]?.embedding.some((value) => value > 0)).toBe(true);
   });
 
-  it("matches the shared vector index contract", () => {
-    const index = buildVectorIndex(sampleIngestion, 8);
+  it("matches the shared vector index contract", async () => {
+    const index = await buildVectorIndex(sampleIngestion, 8);
     const parsed = vectorIndexSchema.safeParse(index);
 
     expect(parsed.success).toBe(true);
@@ -55,7 +54,7 @@ describe("indexing pipeline", () => {
     const outputPath = path.join(tempDir, "vector-index.json");
 
     try {
-      const index = buildVectorIndex(sampleIngestion, 8);
+      const index = await buildVectorIndex(sampleIngestion, 8);
       await writeVectorIndex(outputPath, index);
 
       const raw = await fs.readFile(outputPath, "utf8");
@@ -68,7 +67,7 @@ describe("indexing pipeline", () => {
     }
   });
 
-  it("rejects invalid embedding dimensions", () => {
-    expect(() => generateEmbedding("hello", 0)).toThrow("Embedding dimensions must be a positive integer");
+  it("rejects invalid embedding dimensions", async () => {
+    await expect(buildVectorIndex(sampleIngestion, 0)).rejects.toThrow("Embedding dimensions must be a positive integer");
   });
 });

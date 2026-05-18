@@ -12,7 +12,7 @@ import { registerChatRoutes } from "../src/routes/chat.js";
 import { RagService } from "../src/services/rag.service.js";
 import { InMemoryChatSessionStore } from "../src/services/in-memory-chat-session.store.js";
 
-function buildSampleIndex(): VectorIndex {
+async function buildSampleIndex(): Promise<VectorIndex> {
   const content = "Reset password steps";
   const embeddingDimensions = 8;
   const contentType = "text" as const;
@@ -38,7 +38,7 @@ function buildSampleIndex(): VectorIndex {
         chunkIndex: 0,
         content,
         characterCount: content.length,
-        embedding: generateEmbedding(content, embeddingDimensions),
+        embedding: await generateEmbedding(content, embeddingDimensions, "document"),
       },
     ],
   };
@@ -51,7 +51,7 @@ describe("chat routes with retrieval", () => {
     const chatSessionStore = new InMemoryChatSessionStore();
 
     try {
-      const index = buildSampleIndex();
+      const index = await buildSampleIndex();
       await fs.writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, "utf8");
 
       const ragService = new RagService({ vectorIndexPath: indexPath, topK: 1 });

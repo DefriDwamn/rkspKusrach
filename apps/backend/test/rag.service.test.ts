@@ -9,7 +9,7 @@ import type { VectorIndex } from "@rksp/shared";
 import { generateEmbedding } from "../src/indexing/embedding.js";
 import { RagService } from "../src/services/rag.service.js";
 
-function buildSampleIndex(entries = ["Reset password steps"]): VectorIndex {
+async function buildSampleIndex(entries = ["Reset password steps"]): Promise<VectorIndex> {
   const embeddingDimensions = 8;
   const contentType = "text" as const;
   const documents = entries.map((content, index) => ({
@@ -26,14 +26,14 @@ function buildSampleIndex(entries = ["Reset password steps"]): VectorIndex {
     ingestionGeneratedAt: "2026-05-16T10:20:00.000Z",
     embeddingDimensions,
     documents,
-    entries: entries.map((content, index) => ({
+    entries: await Promise.all(entries.map(async (content, index) => ({
       documentId: documents[index]?.id ?? `kb-${index}`,
       path: documents[index]?.path ?? `kb/doc-${index}.md`,
       chunkIndex: 0,
       content,
       characterCount: content.length,
-      embedding: generateEmbedding(content, embeddingDimensions),
-    })),
+      embedding: await generateEmbedding(content, embeddingDimensions, "document"),
+    }))),
   };
 }
 
@@ -48,7 +48,7 @@ describe("RagService", () => {
     const indexPath = path.join(tempDir, "vector-index.json");
 
     try {
-      const index = buildSampleIndex();
+      const index = await buildSampleIndex();
       await fs.writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, "utf8");
 
       const service = new RagService({ vectorIndexPath: indexPath, topK: 1 });
@@ -73,7 +73,7 @@ describe("RagService", () => {
     const indexPath = path.join(tempDir, "vector-index.json");
 
     try {
-      const index = buildSampleIndex(["Reset password steps", "VPN setup guide"]);
+      const index = await buildSampleIndex(["Reset password steps", "VPN setup guide"]);
       await fs.writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, "utf8");
 
       process.env.RAG_VECTOR_INDEX_PATH = indexPath;
@@ -108,7 +108,7 @@ describe("RagService", () => {
     const indexPath = path.join(tempDir, "vector-index.json");
 
     try {
-      const index = buildSampleIndex();
+      const index = await buildSampleIndex();
       await fs.writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, "utf8");
 
       const service = new RagService({ vectorIndexPath: indexPath, topK: 1 });
