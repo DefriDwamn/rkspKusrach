@@ -8,7 +8,6 @@ export async function createChatSessionStore(
   logger: FastifyBaseLogger
 ): Promise<ChatSessionStore> {
   const databaseUrl = process.env.DATABASE_URL;
-  console.log(`DATABASE_URL: ${databaseUrl}`);
   if (!databaseUrl) {
     logger.info("DATABASE_URL is not set, using in-memory chat session storage");
     return new InMemoryChatSessionStore();

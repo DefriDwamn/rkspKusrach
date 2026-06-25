@@ -18,7 +18,7 @@ export async function registerChatRoutes(
   app: FastifyInstance,
   deps: RegisterChatRoutesDeps
 ): Promise<void> {
-  const ragService = deps.ragService ?? new RagService();
+  const ragService = deps.ragService ?? new RagService({ logger: app.log });
   const sessionStore = deps.chatSessionStore;
 
   app.get("/api/chat/history/:sessionId", async (request, reply) => {

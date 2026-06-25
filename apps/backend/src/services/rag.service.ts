@@ -9,6 +9,9 @@ import { vectorIndexSchema } from "@rksp/shared";
 import { generateEmbedding, type EmbeddingMode } from "../indexing/embedding.js";
 
 type EmbeddingGenerator = (text: string, dimensions: number, mode: EmbeddingMode) => Promise<number[]>;
+type RagLogger = {
+  warn(payload: Record<string, unknown>, message: string): void;
+};
 
 type RagServiceOptions = {
   vectorIndexPath?: string;
@@ -16,6 +19,7 @@ type RagServiceOptions = {
   minScore?: number;
   ollamaClient?: OllamaChatClient | null;
   embeddingGenerator?: EmbeddingGenerator;
+  logger?: RagLogger;
 };
 
 type OllamaChatClient = {
@@ -183,6 +187,7 @@ export class RagService {
   private readonly embeddingGenerator: EmbeddingGenerator;
   private readonly modelName: string;
   private readonly ollamaHost: string;
+  private readonly logger: RagLogger | undefined;
   private cachedIndex: VectorIndex | null | undefined;
 
   constructor(options: RagServiceOptions = {}) {
@@ -195,6 +200,7 @@ export class RagService {
     this.topK = options.topK ?? resolveTopK(process.env.RAG_RETRIEVER_TOP_K, DEFAULT_TOP_K);
     this.minScore = options.minScore ?? resolveMinScore(process.env.RAG_RETRIEVER_MIN_SCORE, DEFAULT_MIN_SCORE);
     this.embeddingGenerator = options.embeddingGenerator ?? generateEmbedding;
+    this.logger = options.logger;
     this.modelName = process.env.OLLAMA_MODEL?.trim() || DEFAULT_MODEL;
 
     const apiKey = process.env.OLLAMA_API_KEY?.trim();
@@ -299,7 +305,7 @@ export class RagService {
             };
           }
         } catch (error) {
-          console.warn({
+          this.logger?.warn({
             model: this.modelName,
             host: this.ollamaHost,
             error: error instanceof Error ? error.message : String(error),
@@ -350,7 +356,7 @@ export class RagService {
       const translated = translationResponse.message?.content?.trim() ?? "";
       return translated.length > 0 ? translated : question;
     } catch (error) {
-      console.warn({
+      this.logger?.warn({
         model: this.modelName,
         host: this.ollamaHost,
         error: error instanceof Error ? error.message : String(error),
