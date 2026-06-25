@@ -140,4 +140,43 @@ describe("ChatWidget", () => {
     expect(screen.getByText("первый пункт").tagName).toBe("LI");
     expect(screen.queryByText(/\*\*Теплоёмкость\*\*/)).not.toBeInTheDocument();
   });
+
+  it("submits with Enter and keeps Shift+Enter for line breaks", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("session-enter") });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessionId: "session-enter",
+          messages: [],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          answer: "Ответ по Enter",
+          grounded: true,
+          citations: [],
+        }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ChatWidget />);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const textarea = screen.getByLabelText("Вопрос");
+    fireEvent.change(textarea, { target: { value: "Первая строка" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Ответ по Enter/)).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

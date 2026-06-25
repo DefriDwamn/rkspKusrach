@@ -183,6 +183,15 @@ export function ChatWidget() {
     }
   };
 
+  const onPromptKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  };
+
   return (
     <section className="chat-shell">
       <header className="chat-header">
@@ -220,6 +229,7 @@ export function ChatWidget() {
         <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
+          onKeyDown={onPromptKeyDown}
           placeholder="Например: как сбросить пароль?"
           aria-label="Вопрос"
         />
