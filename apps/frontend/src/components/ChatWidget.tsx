@@ -7,6 +7,93 @@ import { clearChatHistory, fetchChatHistory, sendChatMessage } from "../lib/api.
 
 const SESSION_STORAGE_KEY = "rksp-chat-session-id";
 
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+
+  for (const match of text.matchAll(pattern)) {
+    const marker = match[0];
+    const index = match.index ?? 0;
+
+    if (index > cursor) {
+      nodes.push(text.slice(cursor, index));
+    }
+
+    if (marker.startsWith("`")) {
+      nodes.push(<code key={`code-${key += 1}`}>{marker.slice(1, -1)}</code>);
+    } else if (marker.startsWith("**")) {
+      nodes.push(<strong key={`strong-${key += 1}`}>{marker.slice(2, -2)}</strong>);
+    } else {
+      nodes.push(<em key={`em-${key += 1}`}>{marker.slice(1, -1)}</em>);
+    }
+
+    cursor = index + marker.length;
+  }
+
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+
+  return nodes;
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+  let key = 0;
+
+  while (index < lines.length) {
+    const line = lines[index]?.trimEnd() ?? "";
+
+    if (line.trim().length === 0) {
+      index += 1;
+      continue;
+    }
+
+    const listItems: string[] = [];
+    while (index < lines.length) {
+      const item = lines[index]?.match(/^\s*(?:[-*]|\d+\.)\s+(.+)$/);
+      if (!item) {
+        break;
+      }
+
+      listItems.push(item[1] ?? "");
+      index += 1;
+    }
+
+    if (listItems.length > 0) {
+      blocks.push(
+        <ul key={`list-${key += 1}`}>
+          {listItems.map((item, itemIndex) => (
+            <li key={`item-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (index < lines.length) {
+      const paragraphLine = lines[index]?.trimEnd() ?? "";
+      if (paragraphLine.trim().length === 0 || /^\s*(?:[-*]|\d+\.)\s+/.test(paragraphLine)) {
+        break;
+      }
+
+      paragraphLines.push(paragraphLine.trim());
+      index += 1;
+    }
+
+    blocks.push(
+      <p key={`paragraph-${key += 1}`}>{renderInlineMarkdown(paragraphLines.join(" "))}</p>,
+    );
+  }
+
+  return <div className="message-content markdown-content">{blocks}</div>;
+}
+
 function resolveSessionId(): string {
   if (typeof window === "undefined") {
     return "server-session";
@@ -117,7 +204,12 @@ export function ChatWidget() {
         {messages.length === 0 && <p>Задайте вопрос базе знаний.</p>}
         {messages.map((message, index) => (
           <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-            <strong>{message.role === "user" ? "Вы" : "Ассистент"}:</strong> {message.content}
+            <strong className="message-label">{message.role === "user" ? "Вы" : "Ассистент"}:</strong>
+            {message.role === "assistant" ? (
+              <MarkdownMessage content={message.content} />
+            ) : (
+              <span className="message-content plain-content">{message.content}</span>
+            )}
           </article>
         ))}
         {loading && <article className="message assistant">Ассистент печатает...</article>}

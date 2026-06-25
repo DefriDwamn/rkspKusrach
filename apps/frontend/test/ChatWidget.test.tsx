@@ -101,4 +101,43 @@ describe("ChatWidget", () => {
       method: "DELETE",
     });
   });
+
+  it("renders assistant markdown formatting", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("session-markdown") });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessionId: "session-markdown",
+          messages: [],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          answer: "**Теплоёмкость**\n\n* первый пункт\n* второй пункт",
+          grounded: true,
+          citations: [],
+        }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ChatWidget />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/chat/history/session-markdown");
+    });
+
+    fireEvent.change(screen.getByLabelText("Вопрос"), {
+      target: { value: "Что такое теплоёмкость?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Теплоёмкость").tagName).toBe("STRONG");
+    });
+    expect(screen.getByText("первый пункт").tagName).toBe("LI");
+    expect(screen.queryByText(/\*\*Теплоёмкость\*\*/)).not.toBeInTheDocument();
+  });
 });
