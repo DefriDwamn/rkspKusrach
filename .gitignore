@@ -5,7 +5,6 @@ docs/
 dist/
 coverage/
 .env
-.env.*
 .next/
 .vscode-test/
 *.log

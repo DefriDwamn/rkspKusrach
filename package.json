@@ -18,6 +18,8 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:fuzz": "cross-env FUZZ_RUNS=1000 npm run test:fuzz --workspaces --if-present",
+    "test:fuzz:long": "cross-env FUZZ_RUNS=10000 npm run test:fuzz --workspaces --if-present",
     "test:watch": "npm run test:watch --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
   },

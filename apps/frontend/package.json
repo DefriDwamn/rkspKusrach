@@ -9,6 +9,7 @@
     "start": "next start --port 3000",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:fuzz": "vitest run test/api.fuzz.test.ts",
     "test:watch": "vitest",
     "lint": "eslint ."
   },
@@ -25,6 +26,7 @@
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
+    "fast-check": "^4.8.0",
     "jsdom": "^29.0.2",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"

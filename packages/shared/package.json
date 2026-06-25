@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:fuzz": "vitest run test/schemas.fuzz.test.ts",
     "test:watch": "vitest",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --ignore-pattern \"src/**/*.d.ts\""
   },
@@ -22,6 +23,7 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "fast-check": "^4.8.0",
     "vitest": "^3.1.2"
   }
 }

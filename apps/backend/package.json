@@ -11,6 +11,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:fuzz": "vitest run test/chat-session-store.fuzz.test.ts test/chat.route.fuzz.test.ts test/ingestion.fuzz.test.ts test/rag.service.fuzz.test.ts test/vector-index.fuzz.test.ts",
     "test:watch": "vitest",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
   },
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/pg": "^8.15.2",
+    "fast-check": "^4.8.0",
     "tsx": "^4.19.3",
     "vitest": "^3.1.2"
   }
