@@ -41,6 +41,27 @@ export async function registerChatRoutes(
     return reply.status(200).send(validation.data);
   });
 
+  app.delete("/api/chat/history/:sessionId", async (request, reply) => {
+    const params = request.params as { sessionId?: string };
+    if (!params.sessionId || params.sessionId.trim().length === 0) {
+      return reply.status(400).send({ error: "Invalid sessionId" });
+    }
+
+    await sessionStore.clearHistory(params.sessionId);
+
+    const payload = {
+      sessionId: params.sessionId,
+      messages: [],
+    };
+    const validation = chatHistoryResponseSchema.safeParse(payload);
+    if (!validation.success) {
+      request.log.error({ issues: validation.error.issues }, "Invalid clear history response shape");
+      return reply.status(500).send({ error: "Invalid response shape" });
+    }
+
+    return reply.status(200).send(validation.data);
+  });
+
   app.post("/api/chat", async (request, reply) => {
     const parsed = chatRequestSchema.safeParse(request.body);
     if (!parsed.success) {

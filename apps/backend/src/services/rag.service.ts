@@ -6,14 +6,34 @@ import { Ollama } from "ollama";
 import type { ChatRequest, ChatResponse, Citation, VectorIndex } from "@rksp/shared";
 import { vectorIndexSchema } from "@rksp/shared";
 
-import { generateEmbedding } from "../indexing/embedding.js";
+import { generateEmbedding, type EmbeddingMode } from "../indexing/embedding.js";
+
+type EmbeddingGenerator = (text: string, dimensions: number, mode: EmbeddingMode) => Promise<number[]>;
 
 type RagServiceOptions = {
   vectorIndexPath?: string;
   topK?: number;
+  minScore?: number;
+  ollamaClient?: OllamaChatClient | null;
+  embeddingGenerator?: EmbeddingGenerator;
 };
 
-const DEFAULT_TOP_K = 3;
+type OllamaChatClient = {
+  chat(request: {
+    model: string;
+    messages: Array<{
+      role: "system" | "user" | "assistant";
+      content: string;
+    }>;
+  }): Promise<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
+const DEFAULT_TOP_K = 5;
+const DEFAULT_MIN_SCORE = 0.2;
 const DEFAULT_MODEL = "gpt-oss:120b";
 const DEFAULT_OLLAMA_HOST = "https://ollama.com";
 
@@ -30,6 +50,23 @@ function resolveTopK(rawValue: string | undefined, fallback: number): number {
   return parsed;
 }
 
+function resolveMinScore(rawValue: string | undefined, fallback: number): number {
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(rawValue);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function shouldLogRetrievalDebug(): boolean {
+  return process.env.RAG_DEBUG_RETRIEVAL?.trim().toLowerCase() === "true";
+}
+
 function resolveVectorIndexPath(rawValue: string | undefined, fallback: string): string {
   if (!rawValue) {
     return fallback;
@@ -39,17 +76,25 @@ function resolveVectorIndexPath(rawValue: string | undefined, fallback: string):
   return trimmed.length > 0 ? trimmed : fallback;
 }
 
-function dotProduct(left: number[], right: number[]): number {
+function cosineSimilarity(left: number[], right: number[]): number {
   const length = Math.min(left.length, right.length);
   let total = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
 
   for (let i = 0; i < length; i += 1) {
     const leftValue = left[i] ?? 0;
     const rightValue = right[i] ?? 0;
     total += leftValue * rightValue;
+    leftNorm += leftValue * leftValue;
+    rightNorm += rightValue * rightValue;
   }
 
-  return total;
+  if (leftNorm === 0 || rightNorm === 0) {
+    return 0;
+  }
+
+  return total / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
 }
 
 function containsCyrillic(text: string): boolean {
@@ -133,8 +178,11 @@ function buildTranslationPrompt(originalQuestion: string): string {
 export class RagService {
   private readonly vectorIndexPath: string;
   private readonly topK: number;
-  private readonly ollamaClient: Ollama | null;
+  private readonly minScore: number;
+  private readonly ollamaClient: OllamaChatClient | null;
+  private readonly embeddingGenerator: EmbeddingGenerator;
   private readonly modelName: string;
+  private readonly ollamaHost: string;
   private cachedIndex: VectorIndex | null | undefined;
 
   constructor(options: RagServiceOptions = {}) {
@@ -145,21 +193,25 @@ export class RagService {
       options.vectorIndexPath ??
       resolveVectorIndexPath(process.env.RAG_VECTOR_INDEX_PATH, defaultIndexPath);
     this.topK = options.topK ?? resolveTopK(process.env.RAG_RETRIEVER_TOP_K, DEFAULT_TOP_K);
+    this.minScore = options.minScore ?? resolveMinScore(process.env.RAG_RETRIEVER_MIN_SCORE, DEFAULT_MIN_SCORE);
+    this.embeddingGenerator = options.embeddingGenerator ?? generateEmbedding;
     this.modelName = process.env.OLLAMA_MODEL?.trim() || DEFAULT_MODEL;
 
     const apiKey = process.env.OLLAMA_API_KEY?.trim();
     const host = process.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
+    this.ollamaHost = host;
+    const clientOptions = {
+      host,
+      ...(apiKey
+        ? {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+            },
+          }
+        : {}),
+    };
 
-    if (apiKey) {
-      this.ollamaClient = new Ollama({
-        host,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-      });
-    } else {
-      this.ollamaClient = null;
-    }
+    this.ollamaClient = options.ollamaClient === undefined ? new Ollama(clientOptions) : options.ollamaClient;
   }
 
   private async loadIndex(): Promise<VectorIndex | null> {
@@ -188,16 +240,39 @@ export class RagService {
   async answer(query: ChatRequest): Promise<ChatResponse> {
     const normalized = query.message.trim();
     const index = await this.loadIndex();
-    const retrievalQuery = await this.translateQueryForRetrieval(normalized);
 
     if (index) {
-      const queryEmbedding = await generateEmbedding(retrievalQuery, index.embeddingDimensions, "query");
+      if (normalized.length === 0) {
+        return {
+          answer: synthesizeAnswer(normalized, []),
+          grounded: false,
+          citations: [],
+        };
+      }
+
+      const retrievalQuery = await this.translateQueryForRetrieval(normalized);
+      const queryEmbedding = await this.embeddingGenerator(retrievalQuery, index.embeddingDimensions, "query");
       const scored = index.entries
-        .map((entry) => ({ entry, score: dotProduct(queryEmbedding, entry.embedding) }))
-        .filter((item) => item.score > 0)
+        .map((entry) => ({ entry, score: cosineSimilarity(queryEmbedding, entry.embedding) }))
+        .filter((item) => item.score >= this.minScore)
         .sort((left, right) => right.score - left.score)
         .slice(0, this.topK);
       const citations = scored.map(({ entry }) => toCitation(entry));
+
+      if (shouldLogRetrievalDebug()) {
+        console.debug({
+          retrievalQuery,
+          topK: this.topK,
+          minScore: this.minScore,
+          embeddingModel: index.embeddingModel,
+          embeddingProvider: index.embeddingProvider,
+          embeddingDimensions: index.embeddingDimensions,
+          results: scored.map(({ entry, score }) => ({
+            score: Number(score.toFixed(4)),
+            path: entry.path,
+          })),
+        }, "RAG retrieval results");
+      }
 
       if (this.ollamaClient && citations.length > 0) {
         try {
@@ -210,7 +285,7 @@ export class RagService {
               },
               {
                 role: "user",
-                content: buildModelPrompt({ ...query, message: retrievalQuery }, citations, scored.map(({ entry }) => entry)),
+                content: buildModelPrompt({ ...query, message: normalized }, citations, scored.map(({ entry }) => entry)),
               },
             ],
           });
@@ -223,8 +298,12 @@ export class RagService {
               citations,
             };
           }
-        } catch {
-          // Fall back to local synthesis when the model request fails.
+        } catch (error) {
+          console.warn({
+            model: this.modelName,
+            host: this.ollamaHost,
+            error: error instanceof Error ? error.message : String(error),
+          }, "Ollama chat request failed; using synthesized RAG fallback");
         }
       }
 
@@ -270,7 +349,12 @@ export class RagService {
 
       const translated = translationResponse.message?.content?.trim() ?? "";
       return translated.length > 0 ? translated : question;
-    } catch {
+    } catch (error) {
+      console.warn({
+        model: this.modelName,
+        host: this.ollamaHost,
+        error: error instanceof Error ? error.message : String(error),
+      }, "Ollama translation request failed; using original retrieval query");
       return question;
     }
   }

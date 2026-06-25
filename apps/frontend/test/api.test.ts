@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveApiUrl } from "../src/lib/api.js";
+import { clearChatHistory, resolveApiUrl } from "../src/lib/api.js";
 
 describe("resolveApiUrl", () => {
   afterEach(() => {
@@ -15,5 +15,24 @@ describe("resolveApiUrl", () => {
 
   it("falls back to the current browser host when the env is missing", () => {
     expect(resolveApiUrl()).toBe(`${window.location.protocol}//${window.location.hostname}:4000`);
+  });
+});
+
+describe("clearChatHistory", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends a delete request for the session history", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ sessionId: "session-1", messages: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(clearChatHistory("session-1")).resolves.toEqual({ sessionId: "session-1", messages: [] });
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/chat/history/session-1", {
+      method: "DELETE",
+    });
   });
 });

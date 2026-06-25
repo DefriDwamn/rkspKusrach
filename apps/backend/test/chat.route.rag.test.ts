@@ -7,10 +7,15 @@ import { describe, expect, it } from "vitest";
 
 import type { VectorIndex } from "@rksp/shared";
 
-import { generateEmbedding } from "../src/indexing/embedding.js";
 import { registerChatRoutes } from "../src/routes/chat.js";
 import { RagService } from "../src/services/rag.service.js";
 import { InMemoryChatSessionStore } from "../src/services/in-memory-chat-session.store.js";
+
+function testEmbedding(dimensions: number): number[] {
+  const vector = Array.from({ length: dimensions }, () => 0);
+  vector[0] = 1;
+  return vector;
+}
 
 async function buildSampleIndex(): Promise<VectorIndex> {
   const content = "Reset password steps";
@@ -21,6 +26,9 @@ async function buildSampleIndex(): Promise<VectorIndex> {
     sourceDir: "data/raw/kaggle",
     generatedAt: "2026-05-16T10:30:00.000Z",
     ingestionGeneratedAt: "2026-05-16T10:20:00.000Z",
+    embeddingProvider: "ollama",
+    embeddingModel: "nomic-embed-text-v2-moe",
+    embeddingHost: "http://localhost:11434",
     embeddingDimensions,
     documents: [
       {
@@ -38,7 +46,7 @@ async function buildSampleIndex(): Promise<VectorIndex> {
         chunkIndex: 0,
         content,
         characterCount: content.length,
-        embedding: await generateEmbedding(content, embeddingDimensions, "document"),
+        embedding: testEmbedding(embeddingDimensions),
       },
     ],
   };
@@ -54,7 +62,12 @@ describe("chat routes with retrieval", () => {
       const index = await buildSampleIndex();
       await fs.writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, "utf8");
 
-      const ragService = new RagService({ vectorIndexPath: indexPath, topK: 1 });
+      const ragService = new RagService({
+        vectorIndexPath: indexPath,
+        topK: 1,
+        ollamaClient: null,
+        embeddingGenerator: async (_text, dimensions) => testEmbedding(dimensions),
+      });
       const app = Fastify({ logger: false });
       await registerChatRoutes(app, { chatSessionStore, ragService });
 

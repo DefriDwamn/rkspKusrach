@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ingestionRunResultSchema, type IngestionRunResult } from "@rksp/shared";
+import { ingestionRunResultSchema, type IngestionRunResult, type VectorIndex } from "@rksp/shared";
 
 import { buildVectorIndex, writeVectorIndex } from "../indexing/vector-index.js";
 
@@ -46,7 +46,7 @@ export async function readIngestionManifest(manifestPath: string): Promise<Inges
 
 export async function runIndexing(
   argv: string[],
-  options: { cwd?: string } = {}
+  options: { cwd?: string; buildIndex?: (ingestion: IngestionRunResult) => Promise<VectorIndex> } = {}
 ): Promise<IndexingRunResult> {
   const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
   const defaultInputPath = path.join(workspaceRoot, "data", "processed", "ingestion-manifest.json");
@@ -58,7 +58,7 @@ export async function runIndexing(
   const outputPath = rawOutputPath ? resolveRelativePath(baseDir, rawOutputPath) : defaultOutputPath;
 
   const ingestionManifest = await readIngestionManifest(inputPath);
-  const vectorIndex = await buildVectorIndex(ingestionManifest);
+  const vectorIndex = await (options.buildIndex ?? buildVectorIndex)(ingestionManifest);
 
   await writeVectorIndex(outputPath, vectorIndex);
 

@@ -1,12 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
+import { RagService } from "../src/services/rag.service.js";
 
 describe("chat routes", () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
 
   beforeAll(async () => {
-    app = await buildApp();
+    app = await buildApp({
+      ragService: new RagService({
+        vectorIndexPath: "D:/missing/vector-index.json",
+        ollamaClient: null,
+      }),
+    });
   });
 
   afterAll(async () => {
@@ -62,6 +68,33 @@ describe("chat routes", () => {
     expect(historyBody.messages).toHaveLength(2);
     expect(historyBody.messages[0].role).toBe("user");
     expect(historyBody.messages[1].role).toBe("assistant");
+  });
+
+  it("clears session history", async () => {
+    const sessionId = "clear-session";
+
+    const chatResponse = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: {
+        sessionId,
+        message: "Что есть в базе?",
+      },
+    });
+    expect(chatResponse.statusCode).toBe(200);
+
+    const clearResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/chat/history/${sessionId}`,
+    });
+    expect(clearResponse.statusCode).toBe(200);
+    expect(clearResponse.json()).toEqual({ sessionId, messages: [] });
+
+    const historyResponse = await app.inject({
+      method: "GET",
+      url: `/api/chat/history/${sessionId}`,
+    });
+    expect(historyResponse.json().messages).toHaveLength(0);
   });
 
   it("rejects invalid payload", async () => {

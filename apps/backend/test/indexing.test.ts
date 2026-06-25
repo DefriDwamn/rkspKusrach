@@ -2,11 +2,11 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { vectorIndexSchema, type IngestionRunResult } from "@rksp/shared";
 
-import { buildVectorIndex, writeVectorIndex } from "../src/indexing/vector-index.js";
+import { buildVectorIndex, buildVectorIndexFromEmbeddings, writeVectorIndex } from "../src/indexing/vector-index.js";
 
 const sampleIngestion: IngestionRunResult = {
   sourceDir: "data/raw/kaggle",
@@ -32,10 +32,17 @@ const sampleIngestion: IngestionRunResult = {
 };
 
 describe("indexing pipeline", () => {
+  afterEach(() => {
+    delete process.env.OLLAMA_EMBED_HOST;
+  });
+
   it("builds a vector index with embeddings", async () => {
-    const index = await buildVectorIndex(sampleIngestion, 8);
+    const index = buildVectorIndexFromEmbeddings(sampleIngestion, [[1, 0, 0, 0, 0, 0, 0, 0]], 8);
 
     expect(index.sourceDir).toBe(sampleIngestion.sourceDir);
+    expect(index.embeddingProvider).toBe("ollama");
+    expect(index.embeddingModel).toBe("nomic-embed-text-v2-moe");
+    expect(index.embeddingHost).toBe("http://localhost:11434");
     expect(index.embeddingDimensions).toBe(8);
     expect(index.entries).toHaveLength(1);
     expect(index.entries[0]?.embedding).toHaveLength(8);
@@ -43,7 +50,7 @@ describe("indexing pipeline", () => {
   });
 
   it("matches the shared vector index contract", async () => {
-    const index = await buildVectorIndex(sampleIngestion, 8);
+    const index = buildVectorIndexFromEmbeddings(sampleIngestion, [[1, 0, 0, 0, 0, 0, 0, 0]], 8);
     const parsed = vectorIndexSchema.safeParse(index);
 
     expect(parsed.success).toBe(true);
@@ -54,7 +61,7 @@ describe("indexing pipeline", () => {
     const outputPath = path.join(tempDir, "vector-index.json");
 
     try {
-      const index = await buildVectorIndex(sampleIngestion, 8);
+      const index = buildVectorIndexFromEmbeddings(sampleIngestion, [[1, 0, 0, 0, 0, 0, 0, 0]], 8);
       await writeVectorIndex(outputPath, index);
 
       const raw = await fs.readFile(outputPath, "utf8");
@@ -69,5 +76,31 @@ describe("indexing pipeline", () => {
 
   it("rejects invalid embedding dimensions", async () => {
     await expect(buildVectorIndex(sampleIngestion, 0)).rejects.toThrow("Embedding dimensions must be a positive integer");
+  });
+
+  it("fails when Ollama embeddings are unavailable", async () => {
+    process.env.OLLAMA_EMBED_HOST = "http://127.0.0.1:1";
+
+    await expect(buildVectorIndex(sampleIngestion, 8)).rejects.toThrow("Failed to generate embeddings with Ollama model");
+  });
+
+  it("rejects embeddings with inconsistent dimensions", () => {
+    const ingestion = {
+      ...sampleIngestion,
+      chunks: [
+        ...sampleIngestion.chunks,
+        {
+          documentId: "faq.md",
+          path: "faq.md",
+          chunkIndex: 1,
+          content: "Second chunk",
+          characterCount: 12,
+        },
+      ],
+    };
+
+    expect(() => buildVectorIndexFromEmbeddings(ingestion, [[1, 0], [1, 0, 0]])).toThrow(
+      "All embeddings must have the same dimensions",
+    );
   });
 });

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { vectorIndexSchema, type IngestionRunResult } from "@rksp/shared";
 
+import { buildVectorIndexFromEmbeddings } from "../src/indexing/vector-index.js";
 import { runIndexing } from "../src/scripts/index-documents-lib.js";
 
 const sampleIngestion: IngestionRunResult = {
@@ -42,6 +43,7 @@ describe("index-documents CLI", () => {
 
       const result = await runIndexing(["--input", manifestPath, "--output", outputPath], {
         cwd: tempDir,
+        buildIndex: async (ingestion) => buildVectorIndexFromEmbeddings(ingestion, [[1, 0, 0, 0]]),
       });
 
       expect(result.inputPath).toBe(manifestPath);

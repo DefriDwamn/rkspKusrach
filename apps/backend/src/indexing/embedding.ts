@@ -1,57 +1,23 @@
-import { createHash } from "node:crypto";
-
 import { Ollama, type Config as OllamaConfig } from "ollama";
 
 const DEFAULT_EMBED_MODEL = "nomic-embed-text-v2-moe";
-const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
+const DEFAULT_EMBED_HOST = "http://localhost:11434";
 const DEFAULT_EMBED_DIMENSIONS = 768;
+const DEFAULT_EMBED_BATCH_SIZE = 32;
+const OLLAMA_EMBEDDING_PROVIDER = "ollama";
 
-type EmbeddingMode = "query" | "document";
+export type EmbeddingMode = "query" | "document";
+type EmbeddingProvider = typeof OLLAMA_EMBEDDING_PROVIDER;
 
-function normalizeToken(token: string): string {
-  return token.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "").trim();
-}
-
-function tokenize(text: string): string[] {
-  return text
-    .split(/\s+/)
-    .map(normalizeToken)
-    .filter((token) => token.length > 0);
-}
-
-function hashTokenToIndex(token: string, dimensions: number): number {
-  const digest = createHash("sha256").update(token).digest();
-  const hashValue = digest.readUInt32BE(0);
-  return hashValue % dimensions;
-}
-
-function generateFallbackEmbedding(text: string, dimensions: number): number[] {
-  if (dimensions <= 0 || !Number.isInteger(dimensions)) {
-    throw new Error("Embedding dimensions must be a positive integer");
-  }
-
-  const vector = Array.from({ length: dimensions }, () => 0);
-  const tokens = tokenize(text);
-
-  if (tokens.length === 0) {
-    return vector;
-  }
-
-  for (const token of tokens) {
-    const index = hashTokenToIndex(token, dimensions);
-    vector[index] = (vector[index] ?? 0) + 1;
-  }
-
-  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-  if (norm === 0) {
-    return vector;
-  }
-
-  return vector.map((value) => Number((value / norm).toFixed(6)));
-}
+export type EmbeddingMetadata = {
+  provider: EmbeddingProvider;
+  model: string;
+  host: string;
+  dimensions: number;
+};
 
 function resolveOllamaClient(): Ollama | null {
-  const host = process.env.OLLAMA_EMBED_HOST?.trim() || DEFAULT_OLLAMA_HOST;
+  const host = resolveEmbedHost();
   const apiKey = process.env.OLLAMA_EMBED_API_KEY?.trim();
   const clientOptions: OllamaConfig = { host };
 
@@ -62,6 +28,10 @@ function resolveOllamaClient(): Ollama | null {
   }
 
   return new Ollama(clientOptions);
+}
+
+function resolveEmbedHost(): string {
+  return process.env.OLLAMA_EMBED_HOST?.trim() || DEFAULT_EMBED_HOST;
 }
 
 function resolveEmbedModel(): string {
@@ -86,6 +56,20 @@ function canUseCloudEmbeddings(dimensions: number): boolean {
   return dimensions >= 256 && dimensions <= DEFAULT_EMBED_DIMENSIONS;
 }
 
+function resolveEmbedBatchSize(): number {
+  const rawValue = process.env.OLLAMA_EMBED_BATCH_SIZE?.trim();
+  if (!rawValue) {
+    return DEFAULT_EMBED_BATCH_SIZE;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    return DEFAULT_EMBED_BATCH_SIZE;
+  }
+
+  return parsed;
+}
+
 function prefixText(text: string, mode: EmbeddingMode): string {
   const trimmed = text.trim();
   if (mode === "query") {
@@ -95,9 +79,8 @@ function prefixText(text: string, mode: EmbeddingMode): string {
   return `search_document: ${trimmed}`;
 }
 
-async function generateOllamaEmbedding(text: string): Promise<number[] | null> {
+async function generateOllamaEmbedding(text: string, dimensions: number): Promise<number[] | null> {
   const client = resolveOllamaClient();
-  const dimensions = resolveEmbedDimensions();
 
   if (!client || !canUseCloudEmbeddings(dimensions)) {
     return null;
@@ -114,27 +97,48 @@ async function generateOllamaEmbedding(text: string): Promise<number[] | null> {
   return Array.isArray(vector) ? vector : null;
 }
 
+export function getEmbeddingMetadata(dimensions = resolveEmbedDimensions()): EmbeddingMetadata {
+  return {
+    provider: OLLAMA_EMBEDDING_PROVIDER,
+    model: resolveEmbedModel(),
+    host: resolveEmbedHost(),
+    dimensions,
+  };
+}
+
+function assertValidDimensions(dimensions: number): void {
+  if (dimensions <= 0 || !Number.isInteger(dimensions)) {
+    throw new Error("Embedding dimensions must be a positive integer");
+  }
+}
+
+function buildEmbeddingFailureMessage(error: unknown): string {
+  const detail = error instanceof Error && error.message.length > 0 ? `: ${error.message}` : "";
+  return [
+    `Failed to generate embeddings with Ollama model "${resolveEmbedModel()}" at ${resolveEmbedHost()}${detail}.`,
+    "Start Ollama and pull the embedding model, or configure OLLAMA_EMBED_HOST/OLLAMA_EMBED_API_KEY.",
+  ].join(" ");
+}
+
 export async function generateEmbedding(
   text: string,
   dimensions = DEFAULT_EMBED_DIMENSIONS,
   mode: EmbeddingMode = "document",
 ): Promise<number[]> {
-  if (dimensions <= 0 || !Number.isInteger(dimensions)) {
-    throw new Error("Embedding dimensions must be a positive integer");
-  }
+  assertValidDimensions(dimensions);
 
   const prefixedText = prefixText(text, mode);
 
   try {
-    const embedding = await generateOllamaEmbedding(prefixedText);
+    const embedding = await generateOllamaEmbedding(prefixedText, dimensions);
     if (embedding && embedding.length > 0) {
       return embedding;
     }
-  } catch {
-    // Fall back to the local hash embedding if cloud embeddings are unavailable.
+  } catch (error) {
+    throw new Error(buildEmbeddingFailureMessage(error));
   }
 
-  return generateFallbackEmbedding(prefixedText, dimensions);
+  throw new Error(buildEmbeddingFailureMessage(new Error("Ollama returned an empty embedding")));
 }
 
 export async function generateEmbeddings(
@@ -142,30 +146,39 @@ export async function generateEmbeddings(
   dimensions = DEFAULT_EMBED_DIMENSIONS,
   mode: EmbeddingMode = "document",
 ): Promise<number[][]> {
-  if (dimensions <= 0 || !Number.isInteger(dimensions)) {
-    throw new Error("Embedding dimensions must be a positive integer");
-  }
+  assertValidDimensions(dimensions);
 
   const prefixedTexts = texts.map((text) => prefixText(text, mode));
-  const client = resolveOllamaClient();
-  const cloudDimensions = resolveEmbedDimensions();
 
-  if (client && canUseCloudEmbeddings(cloudDimensions)) {
-    try {
+  const client = resolveOllamaClient();
+  const ollamaDimensions = resolveEmbedDimensions();
+
+  if (!client || !canUseCloudEmbeddings(ollamaDimensions)) {
+    throw new Error(buildEmbeddingFailureMessage(new Error(`Invalid embedding dimensions: ${ollamaDimensions}`)));
+  }
+
+  try {
+    const batchSize = resolveEmbedBatchSize();
+    const embeddings: number[][] = [];
+
+    for (let index = 0; index < prefixedTexts.length; index += batchSize) {
+      const batch = prefixedTexts.slice(index, index + batchSize);
       const response = await client.embed({
         model: resolveEmbedModel(),
-        input: prefixedTexts,
-        dimensions: cloudDimensions,
+        input: batch,
+        dimensions: ollamaDimensions,
         truncate: true,
       });
 
-      if (response.embeddings.length === prefixedTexts.length) {
-        return response.embeddings;
+      if (response.embeddings.length !== batch.length) {
+        throw new Error(`Ollama returned ${response.embeddings.length} embeddings for ${batch.length} inputs`);
       }
-    } catch {
-      // Fall back to local hash embeddings below.
-    }
-  }
 
-  return prefixedTexts.map((text) => generateFallbackEmbedding(text, dimensions));
+      embeddings.push(...response.embeddings);
+    }
+
+    return embeddings;
+  } catch (error) {
+    throw new Error(buildEmbeddingFailureMessage(error));
+  }
 }

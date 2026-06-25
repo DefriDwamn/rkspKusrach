@@ -5,7 +5,7 @@ import { ingestionRunResultSchema } from "../src/ingestion.js";
 describe("ingestionRunResultSchema", () => {
   it("accepts a valid ingestion manifest", () => {
     const parsed = ingestionRunResultSchema.safeParse({
-      sourceDir: "D:/4kurs/rkspKusrach/data/raw/kaggle",
+      sourceDir: "../../../data/raw/kaggle",
       generatedAt: "2026-05-16T10:30:00.000Z",
       documents: [
         {

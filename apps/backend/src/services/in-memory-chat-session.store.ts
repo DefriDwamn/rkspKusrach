@@ -15,6 +15,10 @@ export class InMemoryChatSessionStore implements ChatSessionStore {
     this.sessions.set(sessionId, history);
   }
 
+  async clearHistory(sessionId: string): Promise<void> {
+    this.sessions.delete(sessionId);
+  }
+
   async close(): Promise<void> {
     this.sessions.clear();
   }

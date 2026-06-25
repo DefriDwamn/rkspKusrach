@@ -15,6 +15,7 @@ const SUPPORTED_EXTENSIONS: Record<string, IngestionContentType> = {
   ".markdown": "markdown",
   ".txt": "text",
 };
+const MIN_ARROW_TEXT_LENGTH = 80;
 
 type ArrowArticleRow = {
   title?: unknown;
@@ -38,6 +39,10 @@ function readTextField(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function shouldIndexArrowText(text: string): boolean {
+  return text.replace(/\s+/g, " ").trim().length >= MIN_ARROW_TEXT_LENGTH;
+}
+
 export function arrowRowsToDocuments(rows: ReadonlyArray<ArrowArticleRow>, sourceLabel: string): IngestionDocument[] {
   const documents: IngestionDocument[] = [];
 
@@ -45,6 +50,10 @@ export function arrowRowsToDocuments(rows: ReadonlyArray<ArrowArticleRow>, sourc
     const title = readTextField(row.title);
     const section = readTextField(row.section);
     const text = readTextField(row.text);
+    if (!shouldIndexArrowText(text)) {
+      continue;
+    }
+
     const content = [title, section, text].filter((segment) => segment.length > 0).join("\n\n");
 
     if (content.length === 0) {
@@ -80,6 +89,11 @@ async function readArrowDocuments(
       const title = readTextField(row.title);
       const section = readTextField(row.section);
       const text = readTextField(row.text);
+      if (!shouldIndexArrowText(text)) {
+        rowIndex += 1;
+        continue;
+      }
+
       const content = [title, section, text].filter((segment) => segment.length > 0).join("\n\n");
 
       if (content.length > 0) {

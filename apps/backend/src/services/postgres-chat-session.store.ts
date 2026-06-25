@@ -48,6 +48,10 @@ export class PostgresChatSessionStore implements ChatSessionStore {
     );
   }
 
+  async clearHistory(sessionId: string): Promise<void> {
+    await this.pool.query("DELETE FROM chat_messages WHERE session_id = $1", [sessionId]);
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }

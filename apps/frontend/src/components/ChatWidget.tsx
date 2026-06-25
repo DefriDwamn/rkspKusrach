@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import type { ChatMessage } from "@rksp/shared";
-import { fetchChatHistory, sendChatMessage } from "../lib/api.js";
+import { clearChatHistory, fetchChatHistory, sendChatMessage } from "../lib/api.js";
 
 const SESSION_STORAGE_KEY = "rksp-chat-session-id";
 
@@ -30,7 +30,9 @@ export function ChatWidget() {
     { sourceId: string; title: string; snippet: string }[]
   >([]);
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const nextSessionId = resolveSessionId();
@@ -42,6 +44,12 @@ export function ChatWidget() {
         setError(requestError instanceof Error ? requestError.message : "Unknown error");
       });
   }, []);
+
+  useEffect(() => {
+    if (typeof messagesEndRef.current?.scrollIntoView === "function") {
+      messagesEndRef.current.scrollIntoView({ block: "end" });
+    }
+  }, [messages, loading]);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -72,8 +80,39 @@ export function ChatWidget() {
     }
   };
 
+  const onClearHistory = async (): Promise<void> => {
+    setClearing(true);
+    setError(null);
+
+    try {
+      await clearChatHistory(sessionId);
+      setMessages([]);
+      setLastCitations([]);
+      setPrompt("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unknown error");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <section className="chat-shell">
+      <header className="chat-header">
+        <div>
+          <h2>RAG чат</h2>
+          <span>{messages.length} сообщений</span>
+        </div>
+        <button
+          className="secondary-button"
+          disabled={clearing || loading || messages.length === 0}
+          onClick={onClearHistory}
+          type="button"
+        >
+          {clearing ? "Очистка..." : "Очистить"}
+        </button>
+      </header>
+
       <div className="messages" aria-live="polite">
         {messages.length === 0 && <p>Задайте вопрос базе знаний.</p>}
         {messages.map((message, index) => (
@@ -81,9 +120,11 @@ export function ChatWidget() {
             <strong>{message.role === "user" ? "Вы" : "Ассистент"}:</strong> {message.content}
           </article>
         ))}
+        {loading && <article className="message assistant">Ассистент печатает...</article>}
+        <div ref={messagesEndRef} />
       </div>
 
-      <form onSubmit={onSubmit}>
+      <form className="composer" onSubmit={onSubmit}>
         <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
