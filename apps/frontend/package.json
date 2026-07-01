@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build --workspace @rksp/shared",
     "dev": "next dev --port 3000",
+    "prebuild": "npm run build --workspace @rksp/shared",
     "build": "next build",
     "start": "next start --port 3000",
+    "pretypecheck": "npm run build --workspace @rksp/shared",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run build --workspace @rksp/shared",
     "test": "vitest run",
+    "pretest:fuzz": "npm run build --workspace @rksp/shared",
     "test:fuzz": "vitest run test/api.fuzz.test.ts",
     "test:watch": "vitest",
     "lint": "eslint ."

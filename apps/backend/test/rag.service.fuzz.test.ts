@@ -129,6 +129,8 @@ describe("RagService fuzzing without real model calls", () => {
             ollamaClient: {
               chat: async () => ({ message: { content: "   " } }),
             },
+            ollamaModel: "test-chat-model",
+            ollamaHost: "http://test-ollama.invalid",
             embeddingGenerator: async () => unitVector(4, 0),
           });
 
@@ -161,6 +163,8 @@ describe("RagService fuzzing without real model calls", () => {
                 return { message: { content: prompts.length === 1 && /\p{Script=Cyrillic}/u.test(message) ? "translated" : "model answer" } };
               },
             },
+            ollamaModel: "test-chat-model",
+            ollamaHost: "http://test-ollama.invalid",
             embeddingGenerator: async () => unitVector(4, 0),
           });
 

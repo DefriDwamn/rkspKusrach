@@ -20,6 +20,8 @@ type RagServiceOptions = {
   ollamaClient?: OllamaChatClient | null;
   embeddingGenerator?: EmbeddingGenerator;
   logger?: RagLogger;
+  ollamaModel?: string;
+  ollamaHost?: string;
 };
 
 type OllamaChatClient = {
@@ -38,8 +40,14 @@ type OllamaChatClient = {
 
 const DEFAULT_TOP_K = 5;
 const DEFAULT_MIN_SCORE = 0.2;
-const DEFAULT_MODEL = "gpt-oss:120b";
-const DEFAULT_OLLAMA_HOST = "https://ollama.com";
+
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Required environment variable ${name} is not set`);
+  }
+  return value;
+}
 
 function resolveTopK(rawValue: string | undefined, fallback: number): number {
   if (!rawValue) {
@@ -69,15 +77,6 @@ function resolveMinScore(rawValue: string | undefined, fallback: number): number
 
 function shouldLogRetrievalDebug(): boolean {
   return process.env.RAG_DEBUG_RETRIEVAL?.trim().toLowerCase() === "true";
-}
-
-function resolveVectorIndexPath(rawValue: string | undefined, fallback: string): string {
-  if (!rawValue) {
-    return fallback;
-  }
-
-  const trimmed = rawValue.trim();
-  return trimmed.length > 0 ? trimmed : fallback;
 }
 
 function cosineSimilarity(left: number[], right: number[]): number {
@@ -192,19 +191,18 @@ export class RagService {
 
   constructor(options: RagServiceOptions = {}) {
     const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-    const defaultIndexPath = path.join(workspaceRoot, "data", "processed", "vector-index.json");
-
-    this.vectorIndexPath =
-      options.vectorIndexPath ??
-      resolveVectorIndexPath(process.env.RAG_VECTOR_INDEX_PATH, defaultIndexPath);
+    this.vectorIndexPath = options.vectorIndexPath
+      ?? process.env.RAG_VECTOR_INDEX_PATH?.trim()
+      ?? path.join(workspaceRoot, "data", "processed", "vector-index.json");
     this.topK = options.topK ?? resolveTopK(process.env.RAG_RETRIEVER_TOP_K, DEFAULT_TOP_K);
     this.minScore = options.minScore ?? resolveMinScore(process.env.RAG_RETRIEVER_MIN_SCORE, DEFAULT_MIN_SCORE);
     this.embeddingGenerator = options.embeddingGenerator ?? generateEmbedding;
     this.logger = options.logger;
-    this.modelName = process.env.OLLAMA_MODEL?.trim() || DEFAULT_MODEL;
+    const ollamaDisabled = options.ollamaClient === null;
+    this.modelName = options.ollamaModel ?? (ollamaDisabled ? "" : requireEnv("OLLAMA_MODEL"));
 
     const apiKey = process.env.OLLAMA_API_KEY?.trim();
-    const host = process.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
+    const host = options.ollamaHost ?? (ollamaDisabled ? "" : requireEnv("OLLAMA_HOST"));
     this.ollamaHost = host;
     const clientOptions = {
       host,

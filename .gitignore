@@ -1,6 +1,9 @@
 node_modules/
 docs/
-.github/
+.github/*
+!.github/workflows/
+.github/workflows/*
+!.github/workflows/deploy-pages.yml
 .npm/
 dist/
 coverage/
@@ -14,5 +17,5 @@ apps/frontend/.env.local
 packages/shared/src/**/*.js
 packages/shared/src/**/*.d.ts
 packages/shared/src/**/*.js.map
-data/processed/
 data/raw/
+out/

@@ -1,9 +1,5 @@
 import { Ollama, type Config as OllamaConfig } from "ollama";
 
-const DEFAULT_EMBED_MODEL = "nomic-embed-text-v2-moe";
-const DEFAULT_EMBED_HOST = "http://localhost:11434";
-const DEFAULT_EMBED_DIMENSIONS = 768;
-const DEFAULT_EMBED_BATCH_SIZE = 32;
 const OLLAMA_EMBEDDING_PROVIDER = "ollama";
 
 export type EmbeddingMode = "query" | "document";
@@ -16,7 +12,15 @@ export type EmbeddingMetadata = {
   dimensions: number;
 };
 
-function resolveOllamaClient(): Ollama | null {
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Required environment variable ${name} is not set`);
+  }
+  return value;
+}
+
+function resolveOllamaClient(): Ollama {
   const host = resolveEmbedHost();
   const apiKey = process.env.OLLAMA_EMBED_API_KEY?.trim();
   const clientOptions: OllamaConfig = { host };
@@ -31,43 +35,31 @@ function resolveOllamaClient(): Ollama | null {
 }
 
 function resolveEmbedHost(): string {
-  return process.env.OLLAMA_EMBED_HOST?.trim() || DEFAULT_EMBED_HOST;
+  return requireEnv("OLLAMA_EMBED_HOST");
 }
 
 function resolveEmbedModel(): string {
-  return process.env.OLLAMA_EMBED_MODEL?.trim() || DEFAULT_EMBED_MODEL;
+  return requireEnv("OLLAMA_EMBED_MODEL");
 }
 
 function resolveEmbedDimensions(): number {
-  const rawValue = process.env.OLLAMA_EMBED_DIMENSIONS?.trim();
-  if (!rawValue) {
-    return DEFAULT_EMBED_DIMENSIONS;
-  }
-
-  const parsed = Number.parseInt(rawValue, 10);
-  if (Number.isNaN(parsed) || parsed <= 0) {
-    return DEFAULT_EMBED_DIMENSIONS;
-  }
-
-  return parsed;
+  return resolvePositiveInteger("OLLAMA_EMBED_DIMENSIONS");
 }
 
 function canUseCloudEmbeddings(dimensions: number): boolean {
-  return dimensions >= 256 && dimensions <= DEFAULT_EMBED_DIMENSIONS;
+  return dimensions >= 256 && dimensions <= 768;
 }
 
 function resolveEmbedBatchSize(): number {
-  const rawValue = process.env.OLLAMA_EMBED_BATCH_SIZE?.trim();
-  if (!rawValue) {
-    return DEFAULT_EMBED_BATCH_SIZE;
-  }
+  return resolvePositiveInteger("OLLAMA_EMBED_BATCH_SIZE");
+}
 
-  const parsed = Number.parseInt(rawValue, 10);
-  if (Number.isNaN(parsed) || parsed <= 0) {
-    return DEFAULT_EMBED_BATCH_SIZE;
+function resolvePositiveInteger(name: string): number {
+  const value = Number.parseInt(requireEnv(name), 10);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Environment variable ${name} must be a positive integer`);
   }
-
-  return parsed;
+  return value;
 }
 
 function prefixText(text: string, mode: EmbeddingMode): string {
@@ -122,7 +114,7 @@ function buildEmbeddingFailureMessage(error: unknown): string {
 
 export async function generateEmbedding(
   text: string,
-  dimensions = DEFAULT_EMBED_DIMENSIONS,
+  dimensions = resolveEmbedDimensions(),
   mode: EmbeddingMode = "document",
 ): Promise<number[]> {
   assertValidDimensions(dimensions);
@@ -143,7 +135,7 @@ export async function generateEmbedding(
 
 export async function generateEmbeddings(
   texts: ReadonlyArray<string>,
-  dimensions = DEFAULT_EMBED_DIMENSIONS,
+  dimensions = resolveEmbedDimensions(),
   mode: EmbeddingMode = "document",
 ): Promise<number[][]> {
   assertValidDimensions(dimensions);
@@ -153,7 +145,7 @@ export async function generateEmbeddings(
   const client = resolveOllamaClient();
   const ollamaDimensions = resolveEmbedDimensions();
 
-  if (!client || !canUseCloudEmbeddings(ollamaDimensions)) {
+  if (!canUseCloudEmbeddings(ollamaDimensions)) {
     throw new Error(buildEmbeddingFailureMessage(new Error(`Invalid embedding dimensions: ${ollamaDimensions}`)));
   }
 

@@ -9,9 +9,19 @@ type BuildAppOptions = {
   ragService?: RagService;
 };
 
+function resolveAllowedOrigins(): Set<string> {
+  return new Set(
+    (process.env.CORS_ORIGINS ?? "")
+      .split(",")
+      .map((origin) => origin.trim().replace(/\/$/, ""))
+      .filter(Boolean),
+  );
+}
+
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
   const chatSessionStore = await createChatSessionStore(app.log);
+  const allowedOrigins = resolveAllowedOrigins();
 
   app.addHook("onClose", async () => {
     await chatSessionStore.close();
@@ -26,19 +36,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         return;
       }
 
-      try {
-        const { hostname, protocol, port } = new URL(origin);
-        const isHttp = protocol === "http:" || protocol === "https:";
-        const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
-        const isPrivateNetwork = /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
-        const isFrontendPort = port === "3000" || port === "";
-
-        if (isHttp && isFrontendPort && (isLocalHost || isPrivateNetwork)) {
-          callback(null, true);
-          return;
-        }
-      } catch {
-        // Ignore malformed origins and reject below.
+      if (allowedOrigins.has(origin.replace(/\/$/, ""))) {
+        callback(null, true);
+        return;
       }
 
       callback(new Error("Origin is not allowed by CORS"), false);

@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: rksp-rag-backend
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: CORS_ORIGINS
+        value: https://defridwamn.github.io
+      - key: RAG_VECTOR_INDEX_PATH
+        value: /app/data/processed/vector-index.json
+      - key: RAG_RETRIEVER_TOP_K
+        value: 5
+      - key: RAG_RETRIEVER_MIN_SCORE
+        value: 0.2
+      - key: RAG_DEBUG_RETRIEVAL
+        value: false
+      - key: OLLAMA_HOST
+        value: https://ollama.com
+      - key: OLLAMA_MODEL
+        value: gpt-oss:120b

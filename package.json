@@ -15,7 +15,7 @@
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace @rksp/shared && npm run build --workspace @rksp/backend && npm run build --workspace @rksp/frontend",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:fuzz": "cross-env FUZZ_RUNS=1000 npm run test:fuzz --workspaces --if-present",

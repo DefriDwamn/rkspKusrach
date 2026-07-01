@@ -263,3 +263,55 @@ OLLAMA_EMBED_BATCH_SIZE=8
 - embedding dimensions.
 
 Не нужно пересобирать индекс, если изменился только frontend или prompt LLM.
+
+## Деплой: Render + GitHub Pages
+
+В репозитории предусмотрена следующая production-схема:
+
+- backend запускается на Render из корневого `Dockerfile` и описан в `render.yaml`;
+- frontend собирается в статические файлы и публикуется workflow `.github/workflows/deploy-pages.yml`;
+- LLM и embedding-модель вызываются по удаленным Ollama API;
+- готовый `data/processed/vector-index.json` копируется прямо в Docker-образ.
+
+### 1. Подготовить индекс
+
+Индекс не строится на Render: это долго и требует embedding-модель. Построй его локально:
+
+```bash
+npm run rag:build
+```
+
+Каталог `data/processed` не исключен из Git, поэтому готовый индекс попадет в репозиторий и затем в Docker-образ. Текущий файл около 85 МБ и укладывается в ограничение GitHub 100 МБ на один файл, но при заметном росте индекса понадобится Git LFS или объектное хранилище.
+
+Даже с готовым индексом embedding нового вопроса вычисляется при каждом запросе. Поэтому `OLLAMA_EMBED_HOST` на Render не может быть `localhost`: нужен удаленный Ollama endpoint, на котором доступна та же `OLLAMA_EMBED_MODEL`, что использовалась при построении индекса. Размерность также должна совпадать.
+
+Ollama Cloud и локальная библиотека Ollama имеют разные наборы доступных моделей. Наличие модели в `ollama pull` не означает, что она доступна через `https://ollama.com`. Перед деплоем проверь список cloud-моделей:
+
+```bash
+curl https://ollama.com/api/tags \
+  -H "Authorization: Bearer $OLLAMA_API_KEY"
+```
+
+На момент подготовки конфигурации `nomic-embed-text-v2-moe` не была доступна в cloud-списке проекта. Практические варианты: поднять Ollama с этой моделью на отдельной доступной машине/VPS либо выбрать внешний embedding-сервис и пересобрать индекс той же моделью. Render нельзя настраивать на `OLLAMA_EMBED_HOST=http://localhost:11434`, если Ollama не запущена внутри того же контейнера.
+
+### 2. Развернуть backend на Render
+
+1. В Render выбери **New > Blueprint** и подключи репозиторий.
+2. Render прочитает `render.yaml` и соберет `Dockerfile`.
+3. Заполни переменные с `sync: false`: Ollama host/model и API keys.
+4. Дождись успешной проверки `/health` и скопируй URL вида `https://rksp-rag-backend.onrender.com`.
+
+Секреты не передаются в Docker build и не хранятся в Git. Если `DATABASE_URL` не задан, история чата хранится в памяти и исчезает при перезапуске бесплатного instance.
+
+### 3. Развернуть frontend на GitHub Pages
+
+1. В GitHub открой **Settings > Secrets and variables > Actions > Variables**.
+2. Создай переменную `RENDER_API_URL` со значением публичного URL backend без завершающего `/`.
+3. В **Settings > Pages > Build and deployment** выбери источник **GitHub Actions**.
+4. Запусти workflow `Deploy frontend to GitHub Pages` или отправь commit в `main`.
+
+Для этого репозитория frontend будет доступен по адресу `https://defridwamn.github.io/rkspKusrach/`. Разрешенный origin уже указан в `render.yaml` через `CORS_ORIGINS`.
+
+### Обязательная конфигурация Ollama
+
+В коде нет запасных значений для Ollama host/model. Backend завершит запуск с понятной ошибкой, если отсутствуют `OLLAMA_HOST` или `OLLAMA_MODEL`; embedding-вызовы требуют `OLLAMA_EMBED_HOST`, `OLLAMA_EMBED_MODEL`, `OLLAMA_EMBED_DIMENSIONS` и `OLLAMA_EMBED_BATCH_SIZE`. Локальные значения перечислены в `.env.example`, production-значения задаются в Render.

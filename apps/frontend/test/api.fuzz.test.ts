@@ -1,5 +1,5 @@
 import fc from "fast-check";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatRequest } from "@rksp/shared";
 
@@ -39,8 +39,13 @@ function stubFailedFetch(status: number): void {
 }
 
 describe("api client fuzzing", () => {
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_API_URL = "http://localhost:4000";
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete process.env.NEXT_PUBLIC_API_URL;
   });
 
   it("encodes arbitrary session ids in history URLs", async () => {

@@ -181,6 +181,8 @@ describe("RagService", () => {
         vectorIndexPath: indexPath,
         topK: 1,
         ollamaClient: fakeOllamaClient,
+        ollamaModel: "test-chat-model",
+        ollamaHost: "http://test-ollama.invalid",
         embeddingGenerator: async (text, dimensions) => testEmbedding(text, dimensions),
       });
       const response = await service.answer({

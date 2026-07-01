@@ -1,0 +1,14 @@
+.git
+.github
+.next
+**/dist
+**/node_modules
+coverage
+data/raw
+data/processed/ingestion-manifest.json
+data/processed/*.gz
+docs
+.env
+*.log
+*.pdf
+*.odt

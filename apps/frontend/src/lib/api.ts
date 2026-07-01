@@ -2,15 +2,12 @@ import type { ChatHistoryResponse, ChatRequest, ChatResponse } from "@rksp/share
 import { chatHistoryResponseSchema } from "@rksp/shared";
 
 export function resolveApiUrl(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, "");
+  if (!apiUrl) {
+    throw new Error("NEXT_PUBLIC_API_URL is not configured");
   }
 
-  if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:4000`;
-  }
-
-  return "http://localhost:4000";
+  return apiUrl;
 }
 
 export async function sendChatMessage(payload: ChatRequest): Promise<ChatResponse> {

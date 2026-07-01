@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { vectorIndexSchema, type IngestionRunResult } from "@rksp/shared";
 
@@ -32,8 +32,18 @@ const sampleIngestion: IngestionRunResult = {
 };
 
 describe("indexing pipeline", () => {
+  beforeEach(() => {
+    process.env.OLLAMA_EMBED_HOST = "http://localhost:11434";
+    process.env.OLLAMA_EMBED_MODEL = "nomic-embed-text-v2-moe";
+    process.env.OLLAMA_EMBED_DIMENSIONS = "768";
+    process.env.OLLAMA_EMBED_BATCH_SIZE = "32";
+  });
+
   afterEach(() => {
     delete process.env.OLLAMA_EMBED_HOST;
+    delete process.env.OLLAMA_EMBED_MODEL;
+    delete process.env.OLLAMA_EMBED_DIMENSIONS;
+    delete process.env.OLLAMA_EMBED_BATCH_SIZE;
   });
 
   it("builds a vector index with embeddings", async () => {
