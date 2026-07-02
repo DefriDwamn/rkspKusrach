@@ -109,10 +109,28 @@ export async function registerChatRoutes(
       return reply.status(400).send({ error: "Invalid payload", issues: body.error.issues });
     }
 
-    const updated = await sessionStore.updateMessage(params.sessionId, messageIndex, body.data.content);
-    if (!updated) {
+    const history = await sessionStore.getHistory(params.sessionId);
+    const question = history[messageIndex];
+    const answer = history[messageIndex + 1];
+    if (!question) {
       return reply.status(404).send({ error: "Message not found" });
     }
+    if (question.role !== "user" || answer?.role !== "assistant") {
+      return reply.status(409).send({ error: "Only a question followed by an assistant answer can be updated" });
+    }
+
+    const historyBeforeAnswer = [
+      ...history.slice(0, messageIndex),
+      { role: "user" as const, content: body.data.content },
+    ].slice(-20);
+    const regenerated = await ragService.answer({
+      sessionId: params.sessionId,
+      message: body.data.content,
+      history: historyBeforeAnswer,
+    });
+
+    await sessionStore.updateMessage(params.sessionId, messageIndex, body.data.content);
+    await sessionStore.updateMessage(params.sessionId, messageIndex + 1, regenerated.answer);
 
     const payload = {
       sessionId: params.sessionId,

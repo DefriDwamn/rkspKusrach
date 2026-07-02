@@ -133,12 +133,13 @@ describe("chat routes", () => {
 
   it("requires authentication for update", async () => {
     const sessionId = "update-session";
-    await app.inject({
+    const createResponse = await app.inject({
       method: "POST",
       url: "/api/chat",
       payload: { sessionId, message: "Старый текст" },
       headers: cookieHeader(authCookie),
     });
+    const originalAnswer = createResponse.json().answer;
 
     const forbiddenResponse = await app.inject({
       method: "PATCH",
@@ -158,6 +159,8 @@ describe("chat routes", () => {
 
     expect(updateResponse.statusCode).toBe(200);
     expect(updateResponse.json().messages[0]).toEqual({ role: "user", content: "Новый текст" });
+    expect(updateResponse.json().messages[1]).toMatchObject({ role: "assistant" });
+    expect(updateResponse.json().messages[1].content).not.toBe(originalAnswer);
   });
 
   it("authenticates registered users and isolates their sessions", async () => {

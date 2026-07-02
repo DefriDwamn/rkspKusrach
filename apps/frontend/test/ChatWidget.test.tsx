@@ -4,6 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWidget } from "../src/components/ChatWidget.js";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 describe("ChatWidget", () => {
   afterEach(() => {
     cleanup();
@@ -160,14 +168,20 @@ describe("ChatWidget", () => {
         ok: true,
         json: async () => ({
           sessionId: "session-edit",
-          messages: [{ role: "user", content: "Старый вопрос" }],
+          messages: [
+            { role: "user", content: "Старый вопрос" },
+            { role: "assistant", content: "Старый ответ" },
+          ],
         }),
       })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           sessionId: "session-edit",
-          messages: [{ role: "user", content: "Новый вопрос" }],
+          messages: [
+            { role: "user", content: "Новый вопрос" },
+            { role: "assistant", content: "Новый ответ" },
+          ],
         }),
       });
 
@@ -187,7 +201,9 @@ describe("ChatWidget", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Новый вопрос/)).toBeInTheDocument();
+      expect(screen.getByText(/Новый ответ/)).toBeInTheDocument();
     });
+    expect(screen.queryByText(/Старый ответ/)).not.toBeInTheDocument();
 
     expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:4000/api/chat/history/session-edit/messages/0", {
       method: "PATCH",
@@ -196,6 +212,50 @@ describe("ChatWidget", () => {
       },
       credentials: "include",
       body: JSON.stringify({ content: "Новый вопрос" }),
+    });
+  });
+
+  it("ignores an authenticated response that arrives after logout", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("user-session")
+      .mockReturnValueOnce("guest-session") });
+    const pendingChat = deferred<{
+      ok: boolean;
+      json: () => Promise<{ answer: string; grounded: boolean; citations: never[] }>;
+    }>();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "editor", guestChatAvailable: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sessionId: "user-session", messages: [] }),
+      })
+      .mockReturnValueOnce(pendingChat.promise)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: false, guestChatAvailable: true }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ChatWidget />);
+    await screen.findByText(/editor:/);
+
+    fireEvent.change(screen.getByLabelText("Вопрос"), { target: { value: "Старый запрос" } });
+    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+
+    await screen.findByRole("button", { name: "Войти" });
+    pendingChat.resolve({
+      ok: true,
+      json: async () => ({ answer: "Запоздавший ответ", grounded: true, citations: [] }),
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Старый запрос/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Запоздавший ответ/)).not.toBeInTheDocument();
     });
   });
 

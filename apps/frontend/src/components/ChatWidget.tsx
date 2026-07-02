@@ -138,22 +138,30 @@ export function ChatWidget() {
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const sessionGenerationRef = useRef(0);
 
   useEffect(() => {
     void fetchAuthStatus()
       .then((status) => {
         const scope = status.authenticated && status.username ? `user:${status.username.toLowerCase()}` : "guest";
         const nextSessionId = resolveSessionId(scope);
+        const generation = sessionGenerationRef.current + 1;
+        sessionGenerationRef.current = generation;
         setSessionId(nextSessionId);
         setAuthState(status.authenticated ? "authenticated" : "guest");
         setAuthenticatedUsername(status.username ?? null);
         setGuestChatUsed(!status.guestChatAvailable);
         if (status.authenticated) {
-          return fetchChatHistory(nextSessionId).then((history) => setMessages(history.messages));
+          return fetchChatHistory(nextSessionId).then((history) => {
+            if (sessionGenerationRef.current === generation) {
+              setMessages(history.messages);
+            }
+          });
         }
         return undefined;
       })
       .catch((requestError) => {
+        sessionGenerationRef.current += 1;
         setError(requestError instanceof Error ? requestError.message : "Unknown error");
         setSessionId(resolveSessionId("guest"));
         setAuthState("guest");
@@ -179,6 +187,9 @@ export function ChatWidget() {
 
     const userMessage: ChatMessage = { role: "user", content: prompt.trim() };
     const nextMessages = [...messages, userMessage];
+    const requestGeneration = sessionGenerationRef.current;
+    const requestSessionId = sessionId;
+    const requestAuthState = authState;
     setMessages(nextMessages);
     setPrompt("");
     setLoading(true);
@@ -186,24 +197,32 @@ export function ChatWidget() {
 
     try {
       const response = await sendChatMessage({
-        sessionId,
+        sessionId: requestSessionId,
         message: userMessage.content,
         history: nextMessages,
       });
 
+      if (sessionGenerationRef.current !== requestGeneration) {
+        return;
+      }
       setMessages((prev) => [...prev, { role: "assistant", content: response.answer }]);
       setLastCitations(response.citations);
-      if (authState === "guest") {
+      if (requestAuthState === "guest") {
         setGuestChatUsed(true);
       }
     } catch (requestError) {
+      if (sessionGenerationRef.current !== requestGeneration) {
+        return;
+      }
       setMessages(messages);
       if (requestError instanceof Error && requestError.message.includes("429")) {
         setGuestChatUsed(true);
       }
       setError(requestError instanceof Error ? requestError.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (sessionGenerationRef.current === requestGeneration) {
+        setLoading(false);
+      }
     }
   };
 
@@ -233,14 +252,20 @@ export function ChatWidget() {
         throw new Error("Authentication response does not contain a username");
       }
       const nextSessionId = resolveSessionId(`user:${status.username.toLowerCase()}`);
+      const generation = sessionGenerationRef.current + 1;
+      sessionGenerationRef.current = generation;
       setSessionId(nextSessionId);
       setAuthState("authenticated");
       setAuthenticatedUsername(status.username);
       setUsername("");
       setPassword("");
       setError(null);
+      setLoading(false);
+      setLastCitations([]);
       const history = await fetchChatHistory(nextSessionId);
-      setMessages(history.messages);
+      if (sessionGenerationRef.current === generation) {
+        setMessages(history.messages);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unknown error");
     } finally {
@@ -254,17 +279,25 @@ export function ChatWidget() {
   };
 
   const onLogout = async (): Promise<void> => {
-    await logout();
-    const status = await fetchAuthStatus();
-    const guestSessionId = resolveSessionId("guest");
-    setSessionId(guestSessionId);
-    setAuthState("guest");
-    setAuthenticatedUsername(null);
-    setGuestChatUsed(!status.guestChatAvailable);
-    setMessages([]);
-    setLastCitations([]);
-    setEditingMessageIndex(null);
-    setEditingMessageContent("");
+    sessionGenerationRef.current += 1;
+    setLoading(false);
+    setError(null);
+
+    try {
+      await logout();
+      const status = await fetchAuthStatus();
+      const guestSessionId = resolveSessionId("guest");
+      setSessionId(guestSessionId);
+      setAuthState("guest");
+      setAuthenticatedUsername(null);
+      setGuestChatUsed(!status.guestChatAvailable);
+      setMessages([]);
+      setLastCitations([]);
+      setEditingMessageIndex(null);
+      setEditingMessageContent("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unknown error");
+    }
   };
 
   const onStartEditMessage = (index: number, currentContent: string): void => {
@@ -291,11 +324,19 @@ export function ChatWidget() {
       return;
     }
 
+    const requestGeneration = sessionGenerationRef.current;
+    const requestSessionId = sessionId;
     try {
-      const updatedHistory = await updateChatMessage(sessionId, editingMessageIndex, nextContent);
+      const updatedHistory = await updateChatMessage(requestSessionId, editingMessageIndex, nextContent);
+      if (sessionGenerationRef.current !== requestGeneration) {
+        return;
+      }
       setMessages(updatedHistory.messages);
       onCancelEditMessage();
     } catch (requestError) {
+      if (sessionGenerationRef.current !== requestGeneration) {
+        return;
+      }
       setError(requestError instanceof Error ? requestError.message : "Unknown error");
     }
   };
