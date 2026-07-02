@@ -9,6 +9,7 @@ export default defineConfig({
       OLLAMA_EMBED_MODEL: "nomic-embed-text-v2-moe",
       OLLAMA_EMBED_DIMENSIONS: "768",
       OLLAMA_EMBED_BATCH_SIZE: "32",
+      CHAT_AUTH_SESSION_SECRET: "test-session-secret",
     },
   },
 });

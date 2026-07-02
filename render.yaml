@@ -4,7 +4,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./apps/backend/Dockerfile
     dockerContext: .
     healthCheckPath: /health
     autoDeployTrigger: commit
@@ -27,3 +27,5 @@ services:
         value: https://ollama.com
       - key: OLLAMA_MODEL
         value: gpt-oss:120b
+      - key: CHAT_AUTH_SESSION_SECRET
+        generateValue: true

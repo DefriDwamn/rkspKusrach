@@ -60,6 +60,7 @@ describe("api client fuzzing", () => {
         await expect(fetchChatHistory(sessionId)).resolves.toEqual({ sessionId, messages: [] });
         expect(fetchMock).toHaveBeenLastCalledWith(
           `http://localhost:4000/api/chat/history/${encodeURIComponent(sessionId)}`,
+          { credentials: "include" },
         );
         vi.unstubAllGlobals();
       }),
@@ -83,6 +84,7 @@ describe("api client fuzzing", () => {
           headers: {
             "Content-Type": "application/json",
           },
+          credentials: "include",
           body: JSON.stringify(payload),
         });
         vi.unstubAllGlobals();
@@ -103,7 +105,7 @@ describe("api client fuzzing", () => {
         await expect(clearChatHistory(sessionId)).resolves.toEqual({ sessionId, messages: [] });
         expect(fetchMock).toHaveBeenLastCalledWith(
           `http://localhost:4000/api/chat/history/${encodeURIComponent(sessionId)}`,
-          { method: "DELETE" },
+          { method: "DELETE", credentials: "include" },
         );
         vi.unstubAllGlobals();
       }),

@@ -1,7 +1,6 @@
 FROM node:22-alpine AS build
 
 WORKDIR /app
-
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
@@ -18,7 +17,7 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=10000 \
+    PORT=4000 \
     RAG_VECTOR_INDEX_PATH=/app/data/processed/vector-index.json
 
 COPY package.json package-lock.json ./
@@ -32,7 +31,7 @@ COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --chown=node:node data/processed/vector-index.json data/processed/vector-index.json
 
 USER node
-EXPOSE 10000
+EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT}/health" >/dev/null || exit 1
 

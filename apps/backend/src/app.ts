@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 
 import { createChatSessionStore } from "./services/chat-session-store.factory.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import type { RagService } from "./services/rag.service.js";
 
@@ -28,8 +29,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   await app.register(cors, {
-    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
+    credentials: true,
     origin: (origin, callback) => {
       if (!origin) {
         callback(null, true);
@@ -46,6 +48,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   app.get("/health", async () => ({ status: "ok" }));
+  await registerAuthRoutes(app, chatSessionStore);
   await registerChatRoutes(app, {
     chatSessionStore,
     ...(options.ragService ? { ragService: options.ragService } : {}),

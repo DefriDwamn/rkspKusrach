@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { chatHistoryResponseSchema, chatRequestSchema } from "../src/chat.js";
+import {
+  authCredentialsSchema,
+  authStatusSchema,
+  chatHistoryResponseSchema,
+  chatRequestSchema,
+  updateChatMessageSchema,
+} from "../src/chat.js";
 
 describe("chatRequestSchema", () => {
   it("accepts valid payload", () => {
@@ -35,5 +41,28 @@ describe("chatHistoryResponseSchema", () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe("chat update schema", () => {
+  it("accepts trimmed non-empty update content", () => {
+    expect(updateChatMessageSchema.parse({ content: "  Исправленный текст  " })).toEqual({
+      content: "Исправленный текст",
+    });
+  });
+
+  it("rejects empty updates", () => {
+    expect(updateChatMessageSchema.safeParse({ content: "   " }).success).toBe(false);
+  });
+});
+
+describe("authentication schemas", () => {
+  it("accepts valid credentials and status", () => {
+    expect(authCredentialsSchema.safeParse({ username: "user.name", password: "password123" }).success).toBe(true);
+    expect(authStatusSchema.safeParse({ authenticated: false, guestChatAvailable: true }).success).toBe(true);
+  });
+
+  it("rejects short passwords and invalid usernames", () => {
+    expect(authCredentialsSchema.safeParse({ username: "a b", password: "short" }).success).toBe(false);
   });
 });

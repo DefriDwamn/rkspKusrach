@@ -159,6 +159,65 @@ npm run db:logs
 
 Если `DATABASE_URL` задан, backend пишет историю чата в PostgreSQL. Если нет, используется in-memory хранилище, и история пропадает после перезапуска backend.
 
+## CRUD, аутентификация и авторизация
+
+Для истории сообщений реализован полный CRUD:
+
+| Операция | HTTP endpoint | Назначение |
+| --- | --- | --- |
+| Create | `POST /api/chat` | добавить вопрос и ответ в историю |
+| Read | `GET /api/chat/history/:sessionId` | получить историю сессии |
+| Update | `PATCH /api/chat/history/:sessionId/messages/:messageIndex` | изменить сохраненное сообщение после входа |
+| Delete | `DELETE /api/chat/history/:sessionId` | очистить историю сессии |
+
+В приложении есть два состояния доступа:
+
+- гость может выполнить один запрос к чату;
+- авторизованный пользователь может отправлять запросы без гостевого ограничения, читать, редактировать и очищать свою историю.
+
+Пользователь регистрируется и входит через UI. Пароль хешируется алгоритмом `scrypt`, а в PostgreSQL сохраняются имя и хеш в таблице `app_users`. Backend выдает подписанную `HttpOnly` cookie; секрет подписи задается в окружении:
+
+```env
+CHAT_AUTH_SESSION_SECRET=replace-with-a-long-random-secret
+```
+
+Пример регистрации:
+
+```bash
+curl -X POST http://localhost:4000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"student","password":"strong-password"}'
+```
+
+После регистрации или входа браузер получает cookie сессии. История привязывается к владельцу session ID: другой авторизованный пользователь получает `403` при попытке обратиться к чужой сессии. Гостевой лимит хранится на backend в `guest_chat_usage`, поэтому обновление страницы не восстанавливает запрос.
+
+Для Update используется редактирование уже сохраненного вопроса. Это полезно, когда пользователь исправил опечатку, хочет убрать личный фрагмент или переформулировать запрос перед повторным поиском. Если нужен новый вопрос, лучше отправить обычный `POST /api/chat`.
+
+Когда использовать Update:
+
+- если пользователь заметил опечатку в уже отправленном сообщении;
+- если нужно исправить вопрос до повторного поиска;
+- если нужно убрать случайно отправленный приватный фрагмент из истории;
+- если нужно изменить сохраненный вопрос через кнопку редактирования в интерфейсе.
+
+Если пользователь просто хочет задать новый вопрос, Update не нужен: достаточно отправить новый `POST /api/chat`.
+
+## Docker
+
+Контейнеризация разделена по приложениям:
+
+- `apps/backend/Dockerfile` собирает Fastify backend и включает готовый векторный индекс;
+- `apps/frontend/Dockerfile` собирает статический Next.js frontend и отдает его через Nginx;
+- `docker-compose.yml` запускает frontend, backend и PostgreSQL.
+
+Запуск всего проекта:
+
+```bash
+npm run docker:up
+```
+
+После запуска frontend доступен на `http://localhost:3000`, backend на `http://localhost:4000`, PostgreSQL на порту `5432`.
+
 ## Команды разработки
 
 Запуск всего проекта:
@@ -268,10 +327,12 @@ OLLAMA_EMBED_BATCH_SIZE=8
 
 В репозитории предусмотрена следующая production-схема:
 
-- backend запускается на Render из корневого `Dockerfile` и описан в `render.yaml`;
+- backend запускается на Render из `apps/backend/Dockerfile` и описан в `render.yaml`;
 - frontend собирается в статические файлы и публикуется workflow `.github/workflows/deploy-pages.yml`;
 - LLM и embedding-модель вызываются по удаленным Ollama API;
 - готовый `data/processed/vector-index.json` копируется прямо в Docker-образ.
+
+Render-конфигурация предназначена для подтверждения деплоя и не поднимает embedding-модель. Без `OLLAMA_EMBED_*` endpoint `/api/chat` возвращает демонстрационное сообщение без RAG-поиска, а `/health` подтверждает работу backend.
 
 ### 1. Подготовить индекс
 
@@ -283,23 +344,11 @@ npm run rag:build
 
 Каталог `data/processed` не исключен из Git, поэтому готовый индекс попадет в репозиторий и затем в Docker-образ. Текущий файл около 85 МБ и укладывается в ограничение GitHub 100 МБ на один файл, но при заметном росте индекса понадобится Git LFS или объектное хранилище.
 
-Даже с готовым индексом embedding нового вопроса вычисляется при каждом запросе. Поэтому `OLLAMA_EMBED_HOST` на Render не может быть `localhost`: нужен удаленный Ollama endpoint, на котором доступна та же `OLLAMA_EMBED_MODEL`, что использовалась при построении индекса. Размерность также должна совпадать.
-
-Ollama Cloud и локальная библиотека Ollama имеют разные наборы доступных моделей. Наличие модели в `ollama pull` не означает, что она доступна через `https://ollama.com`. Перед деплоем проверь список cloud-моделей:
-
-```bash
-curl https://ollama.com/api/tags \
-  -H "Authorization: Bearer $OLLAMA_API_KEY"
-```
-
-На момент подготовки конфигурации `nomic-embed-text-v2-moe` не была доступна в cloud-списке проекта. Практические варианты: поднять Ollama с этой моделью на отдельной доступной машине/VPS либо выбрать внешний embedding-сервис и пересобрать индекс той же моделью. Render нельзя настраивать на `OLLAMA_EMBED_HOST=http://localhost:11434`, если Ollama не запущена внутри того же контейнера.
-
 ### 2. Развернуть backend на Render
 
 1. В Render выбери **New > Blueprint** и подключи репозиторий.
-2. Render прочитает `render.yaml` и соберет `Dockerfile`.
-3. Заполни переменные с `sync: false`: Ollama host/model и API keys.
-4. Дождись успешной проверки `/health` и скопируй URL вида `https://rksp-rag-backend.onrender.com`.
+2. Render прочитает `render.yaml` и соберет `apps/backend/Dockerfile`.
+3. Дождись успешной проверки `/health` и скопируй URL вида `https://rksp-rag-backend.onrender.com`.
 
 Секреты не передаются в Docker build и не хранятся в Git. Если `DATABASE_URL` не задан, история чата хранится в памяти и исчезает при перезапуске бесплатного instance.
 
@@ -314,4 +363,4 @@ curl https://ollama.com/api/tags \
 
 ### Обязательная конфигурация Ollama
 
-В коде нет запасных значений для Ollama host/model. Backend завершит запуск с понятной ошибкой, если отсутствуют `OLLAMA_HOST` или `OLLAMA_MODEL`; embedding-вызовы требуют `OLLAMA_EMBED_HOST`, `OLLAMA_EMBED_MODEL`, `OLLAMA_EMBED_DIMENSIONS` и `OLLAMA_EMBED_BATCH_SIZE`. Локальные значения перечислены в `.env.example`, production-значения задаются в Render.
+В коде нет запасных значений для Ollama host/model. Локальные значения перечислены в `.env.example`, а демонстрационные значения Render находятся в `render.yaml`. Для полноценного RAG на хостинге дополнительно нужен удаленный embedding endpoint.

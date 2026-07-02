@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { chatRequestSchema, type ChatRequest, type ChatResponse } from "@rksp/shared";
 
 import { registerChatRoutes } from "../src/routes/chat.js";
+import { buildAuthCookie } from "../src/services/auth.service.js";
 import { InMemoryChatSessionStore } from "../src/services/in-memory-chat-session.store.js";
 import type { RagService } from "../src/services/rag.service.js";
 
@@ -36,6 +37,10 @@ const chatRequest = fc.record({
   history: fc.option(fc.array(chatMessage, { maxLength: 20 }), { nil: undefined }),
 });
 const fuzzTimeoutMs = 10 * 60 * 1000;
+const authCookie = buildAuthCookie(
+  { id: "fuzz-user", username: "fuzz-user", passwordHash: "unused" },
+  { sessionSecret: "test-session-secret" },
+).split(";")[0] ?? "";
 
 function buildFakeRagService(answer: string, citations: ChatResponse["citations"] = []): RagService {
   return {
@@ -63,6 +68,7 @@ describe("chat route fuzzing", () => {
             url: "/api/chat",
             headers: {
               "content-type": "application/json",
+              cookie: authCookie,
             },
             payload: JSON.stringify(payload),
           });
@@ -83,6 +89,7 @@ describe("chat route fuzzing", () => {
           const historyResponse = await app.inject({
             method: "GET",
             url: `/api/chat/history/${encodeURIComponent(payload.sessionId)}`,
+            headers: { cookie: authCookie },
           });
           expect(historyResponse.statusCode).toBe(200);
           expect(historyResponse.json()).toEqual({
@@ -150,12 +157,13 @@ describe("chat route fuzzing", () => {
 
         try {
           await registerChatRoutes(app, { chatSessionStore: store, ragService });
-          await app.inject({ method: "POST", url: "/api/chat", payload: leftPayload });
-          await app.inject({ method: "POST", url: "/api/chat", payload: rightPayload });
+          await app.inject({ method: "POST", url: "/api/chat", headers: { cookie: authCookie }, payload: leftPayload });
+          await app.inject({ method: "POST", url: "/api/chat", headers: { cookie: authCookie }, payload: rightPayload });
 
           const clearResponse = await app.inject({
             method: "DELETE",
             url: `/api/chat/history/${encodeURIComponent(leftPayload.sessionId)}`,
+            headers: { cookie: authCookie },
           });
           expect(clearResponse.statusCode).toBe(200);
           expect(clearResponse.json()).toEqual({ sessionId: leftPayload.sessionId, messages: [] });
@@ -163,6 +171,7 @@ describe("chat route fuzzing", () => {
           const rightHistoryResponse = await app.inject({
             method: "GET",
             url: `/api/chat/history/${encodeURIComponent(rightPayload.sessionId)}`,
+            headers: { cookie: authCookie },
           });
           expect(rightHistoryResponse.statusCode).toBe(200);
           expect(rightHistoryResponse.json().messages).toHaveLength(2);

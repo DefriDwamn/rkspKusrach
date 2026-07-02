@@ -74,6 +74,50 @@ describe("in-memory chat session store fuzzing", () => {
       fuzzConfig,
     );
   });
+
+  it("updates only the requested message", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        nonEmptyText,
+        fc.array(chatMessage, { minLength: 1, maxLength: 20 }),
+        nonEmptyText,
+        async (sessionId, messages, replacement) => {
+          const store = new InMemoryChatSessionStore();
+          await appendAll(store, sessionId, messages);
+          const messageIndex = messages.length - 1;
+
+          expect(await store.updateMessage(sessionId, messageIndex, replacement)).toBe(true);
+          expect(await store.getHistory(sessionId)).toEqual(
+            messages.map((message, index) => (
+              index === messageIndex ? { ...message, content: replacement } : message
+            )),
+          );
+          expect(await store.updateMessage(sessionId, messages.length, replacement)).toBe(false);
+        },
+      ),
+      fuzzConfig,
+    );
+  });
+
+  it("keeps users, session ownership, and guest limits consistent", async () => {
+    await fc.assert(
+      fc.asyncProperty(nonEmptyText, nonEmptyText, async (rawUsername, guestId) => {
+        const username = rawUsername.slice(0, 64);
+        const store = new InMemoryChatSessionStore();
+        const user = await store.createUser(username, "hash");
+
+        expect(user).not.toBeNull();
+        expect(await store.findUserByUsername(username.toUpperCase())).toEqual(user);
+        expect(await store.createUser(username.toUpperCase(), "another-hash")).toBeNull();
+        expect(await store.claimSession("session", user?.id ?? "")).toBe(true);
+        expect(await store.claimSession("session", "another-user")).toBe(false);
+        expect(await store.hasGuestChatAllowance(guestId)).toBe(true);
+        expect(await store.consumeGuestChatAllowance(guestId)).toBe(true);
+        expect(await store.consumeGuestChatAllowance(guestId)).toBe(false);
+      }),
+      fuzzConfig,
+    );
+  });
 });
 
 async function appendAll(

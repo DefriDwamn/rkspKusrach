@@ -15,13 +15,11 @@ describe("ChatWidget", () => {
     const randomUuidMock = vi.fn().mockReturnValue("session-test-1");
     vi.stubGlobal("crypto", { randomUUID: randomUuidMock });
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        sessionId: "session-test-1",
-        messages: [],
-      }),
-    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "editor", guestChatAvailable: true }),
+      })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -49,7 +47,7 @@ describe("ChatWidget", () => {
     render(<ChatWidget />);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/chat/history/session-test-1");
+        expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/auth/me", { credentials: "include" });
     });
 
     fireEvent.change(screen.getByLabelText("Вопрос"), {
@@ -62,12 +60,60 @@ describe("ChatWidget", () => {
       expect(screen.getByText(/Тестовый ответ/)).toBeInTheDocument();
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("registers a user and switches to authenticated mode", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("registered-session") });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: false, guestChatAvailable: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "student", guestChatAvailable: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sessionId: "registered-session", messages: [] }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ChatWidget />);
+    await screen.findByRole("button", { name: "Регистрация" });
+    fireEvent.change(screen.getByLabelText("Логин"), { target: { value: "student" } });
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Регистрация" }));
+
+    await waitFor(() => expect(screen.getByText(/student:/)).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/auth/register", expect.objectContaining({
+      method: "POST",
+      credentials: "include",
+    }));
+  });
+
+  it("disables guest input when the server reports the limit is used", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("guest-session") });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ authenticated: false, guestChatAvailable: false }),
+    }));
+
+    render(<ChatWidget />);
+
+    await waitFor(() => expect(screen.getByText("Гостевой запрос использован")).toBeInTheDocument());
+    expect(screen.getByLabelText("Вопрос")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Недоступно" })).toBeDisabled();
   });
 
   it("clears chat history", async () => {
     vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("session-test-clear") });
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "editor", guestChatAvailable: true }),
+      })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -99,12 +145,67 @@ describe("ChatWidget", () => {
 
     expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:4000/api/chat/history/session-test-clear", {
       method: "DELETE",
+      credentials: "include",
+    });
+  });
+
+  it("edits a message inline", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("session-edit") });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "editor", guestChatAvailable: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessionId: "session-edit",
+          messages: [{ role: "user", content: "Старый вопрос" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessionId: "session-edit",
+          messages: [{ role: "user", content: "Новый вопрос" }],
+        }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ChatWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Старый вопрос/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Редактировать сообщение" }));
+
+    const editor = screen.getByLabelText("Текст сообщения");
+    fireEvent.change(editor, { target: { value: "Новый вопрос" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Новый вопрос/)).toBeInTheDocument();
+    });
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:4000/api/chat/history/session-edit/messages/0", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ content: "Новый вопрос" }),
     });
   });
 
   it("renders assistant markdown formatting", async () => {
     vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("session-markdown") });
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "editor", guestChatAvailable: true }),
+      })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -126,7 +227,10 @@ describe("ChatWidget", () => {
     render(<ChatWidget />);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/chat/history/session-markdown");
+      expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/auth/me", { credentials: "include" });
+      expect(fetchMock).toHaveBeenCalledWith("http://localhost:4000/api/chat/history/session-markdown", {
+        credentials: "include",
+      });
     });
 
     fireEvent.change(screen.getByLabelText("Вопрос"), {
@@ -144,6 +248,10 @@ describe("ChatWidget", () => {
   it("submits with Enter and keeps Shift+Enter for line breaks", async () => {
     vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("session-enter") });
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ authenticated: true, username: "editor", guestChatAvailable: true }),
+      })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -164,19 +272,19 @@ describe("ChatWidget", () => {
 
     render(<ChatWidget />);
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     const textarea = screen.getByLabelText("Вопрос");
     fireEvent.change(textarea, { target: { value: "Первая строка" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     await waitFor(() => {
       expect(screen.getByText(/Ответ по Enter/)).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

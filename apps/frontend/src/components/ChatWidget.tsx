@@ -3,7 +3,16 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import type { ChatMessage } from "@rksp/shared";
-import { clearChatHistory, fetchChatHistory, sendChatMessage } from "../lib/api.js";
+import {
+  clearChatHistory,
+  fetchAuthStatus,
+  fetchChatHistory,
+  login,
+  logout,
+  register,
+  sendChatMessage,
+  updateChatMessage,
+} from "../lib/api.js";
 
 const SESSION_STORAGE_KEY = "rksp-chat-session-id";
 
@@ -94,24 +103,33 @@ function MarkdownMessage({ content }: { content: string }) {
   return <div className="message-content markdown-content">{blocks}</div>;
 }
 
-function resolveSessionId(): string {
+function resolveSessionId(scope: string): string {
   if (typeof window === "undefined") {
     return "server-session";
   }
 
-  const existing = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  const storageKey = `${SESSION_STORAGE_KEY}:${scope}`;
+  const existing = window.localStorage.getItem(storageKey);
   if (existing) {
     return existing;
   }
 
   const next = window.crypto.randomUUID();
-  window.localStorage.setItem(SESSION_STORAGE_KEY, next);
+  window.localStorage.setItem(storageKey, next);
   return next;
 }
 
 export function ChatWidget() {
+  const [authState, setAuthState] = useState<"loading" | "guest" | "authenticated">("loading");
+  const [authenticatedUsername, setAuthenticatedUsername] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [guestChatUsed, setGuestChatUsed] = useState(false);
   const [sessionId, setSessionId] = useState<string>("server-session");
   const [prompt, setPrompt] = useState("");
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editingMessageContent, setEditingMessageContent] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [lastCitations, setLastCitations] = useState<
     { sourceId: string; title: string; snippet: string }[]
@@ -122,13 +140,23 @@ export function ChatWidget() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const nextSessionId = resolveSessionId();
-    setSessionId(nextSessionId);
-
-    void fetchChatHistory(nextSessionId)
-      .then((history) => setMessages(history.messages))
+    void fetchAuthStatus()
+      .then((status) => {
+        const scope = status.authenticated && status.username ? `user:${status.username.toLowerCase()}` : "guest";
+        const nextSessionId = resolveSessionId(scope);
+        setSessionId(nextSessionId);
+        setAuthState(status.authenticated ? "authenticated" : "guest");
+        setAuthenticatedUsername(status.username ?? null);
+        setGuestChatUsed(!status.guestChatAvailable);
+        if (status.authenticated) {
+          return fetchChatHistory(nextSessionId).then((history) => setMessages(history.messages));
+        }
+        return undefined;
+      })
       .catch((requestError) => {
         setError(requestError instanceof Error ? requestError.message : "Unknown error");
+        setSessionId(resolveSessionId("guest"));
+        setAuthState("guest");
       });
   }, []);
 
@@ -141,6 +169,11 @@ export function ChatWidget() {
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     if (!prompt.trim()) {
+      return;
+    }
+
+    if (authState === "guest" && guestChatUsed) {
+      setError("Для анонимного режима доступен только один запрос. Войдите, чтобы продолжить.");
       return;
     }
 
@@ -160,7 +193,14 @@ export function ChatWidget() {
 
       setMessages((prev) => [...prev, { role: "assistant", content: response.answer }]);
       setLastCitations(response.citations);
+      if (authState === "guest") {
+        setGuestChatUsed(true);
+      }
     } catch (requestError) {
+      setMessages(messages);
+      if (requestError instanceof Error && requestError.message.includes("429")) {
+        setGuestChatUsed(true);
+      }
       setError(requestError instanceof Error ? requestError.message : "Unknown error");
     } finally {
       setLoading(false);
@@ -176,10 +216,87 @@ export function ChatWidget() {
       setMessages([]);
       setLastCitations([]);
       setPrompt("");
+      setEditingMessageIndex(null);
+      setEditingMessageContent("");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unknown error");
     } finally {
       setClearing(false);
+    }
+  };
+
+  const authenticate = async (action: typeof login | typeof register): Promise<void> => {
+    setAuthSubmitting(true);
+    try {
+      const status = await action(username, password);
+      if (!status.username) {
+        throw new Error("Authentication response does not contain a username");
+      }
+      const nextSessionId = resolveSessionId(`user:${status.username.toLowerCase()}`);
+      setSessionId(nextSessionId);
+      setAuthState("authenticated");
+      setAuthenticatedUsername(status.username);
+      setUsername("");
+      setPassword("");
+      setError(null);
+      const history = await fetchChatHistory(nextSessionId);
+      setMessages(history.messages);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unknown error");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const onLogin = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    void authenticate(login);
+  };
+
+  const onLogout = async (): Promise<void> => {
+    await logout();
+    const status = await fetchAuthStatus();
+    const guestSessionId = resolveSessionId("guest");
+    setSessionId(guestSessionId);
+    setAuthState("guest");
+    setAuthenticatedUsername(null);
+    setGuestChatUsed(!status.guestChatAvailable);
+    setMessages([]);
+    setLastCitations([]);
+    setEditingMessageIndex(null);
+    setEditingMessageContent("");
+  };
+
+  const onStartEditMessage = (index: number, currentContent: string): void => {
+    setEditingMessageIndex(index);
+    setEditingMessageContent(currentContent);
+    setError(null);
+  };
+
+  const onCancelEditMessage = (): void => {
+    setEditingMessageIndex(null);
+    setEditingMessageContent("");
+  };
+
+  const onSaveEditMessage = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+
+    if (editingMessageIndex === null) {
+      return;
+    }
+
+    const nextContent = editingMessageContent.trim();
+    if (!nextContent) {
+      setError("Сообщение не может быть пустым.");
+      return;
+    }
+
+    try {
+      const updatedHistory = await updateChatMessage(sessionId, editingMessageIndex, nextContent);
+      setMessages(updatedHistory.messages);
+      onCancelEditMessage();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unknown error");
     }
   };
 
@@ -197,27 +314,93 @@ export function ChatWidget() {
       <header className="chat-header">
         <div>
           <h2>RAG чат</h2>
-          <span>{messages.length} сообщений</span>
+          <span>
+            {authState === "authenticated"
+              ? `${authenticatedUsername ?? "Пользователь"}: ${messages.length} сообщений`
+              : guestChatUsed ? "Гостевой запрос использован" : "Гостевой режим: доступен один запрос"}
+          </span>
         </div>
-        <button
-          className="secondary-button"
-          disabled={clearing || loading || messages.length === 0}
-          onClick={onClearHistory}
-          type="button"
-        >
-          {clearing ? "Очистка..." : "Очистить"}
-        </button>
+        <div className="chat-header-actions">
+          {authState === "authenticated" ? (
+            <button className="secondary-button" disabled={clearing || loading || messages.length === 0} onClick={onClearHistory} type="button">
+              {clearing ? "Очистка..." : "Очистить"}
+            </button>
+          ) : null}
+          {authState === "authenticated" ? (
+            <button className="secondary-button" onClick={onLogout} type="button">Выйти</button>
+          ) : null}
+        </div>
       </header>
+
+      {authState !== "authenticated" && (
+        <form className="auth-panel" onSubmit={onLogin}>
+          <input
+            autoComplete="username"
+            aria-label="Логин"
+            placeholder="Логин"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+          />
+          <input
+            autoComplete="current-password"
+            aria-label="Пароль"
+            placeholder="Пароль"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <div className="auth-actions">
+            <button disabled={authSubmitting || username.length === 0 || password.length === 0} type="submit">
+              {authSubmitting ? "Подождите..." : "Войти"}
+            </button>
+            <button
+              className="secondary-button"
+              disabled={authSubmitting || username.length === 0 || password.length < 8}
+              onClick={() => void authenticate(register)}
+              type="button"
+            >
+              Регистрация
+            </button>
+          </div>
+        </form>
+      )}
 
       <div className="messages" aria-live="polite">
         {messages.length === 0 && <p>Задайте вопрос базе знаний.</p>}
         {messages.map((message, index) => (
           <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-            <strong className="message-label">{message.role === "user" ? "Вы" : "Ассистент"}:</strong>
+            <div className="message-header">
+              <strong className="message-label">{message.role === "user" ? "Вы" : "Ассистент"}:</strong>
+              {message.role === "user" && authState === "authenticated" && (
+                <button
+                  className="secondary-button message-edit-button"
+                  aria-label="Редактировать сообщение"
+                  onClick={() => onStartEditMessage(index, message.content)}
+                  type="button"
+                >
+                  Ред.
+                </button>
+              )}
+            </div>
             {message.role === "assistant" ? (
               <MarkdownMessage content={message.content} />
             ) : (
               <span className="message-content plain-content">{message.content}</span>
+            )}
+            {message.role === "user" && authState === "authenticated" && editingMessageIndex === index && (
+              <form className="edit-panel" onSubmit={(event) => void onSaveEditMessage(event)}>
+                <textarea
+                  aria-label="Текст сообщения"
+                  value={editingMessageContent}
+                  onChange={(event) => setEditingMessageContent(event.target.value)}
+                />
+                <div className="edit-panel-actions">
+                  <button type="submit">Сохранить</button>
+                  <button className="secondary-button" onClick={onCancelEditMessage} type="button">
+                    Отмена
+                  </button>
+                </div>
+              </form>
             )}
           </article>
         ))}
@@ -227,14 +410,15 @@ export function ChatWidget() {
 
       <form className="composer" onSubmit={onSubmit}>
         <textarea
+          disabled={authState === "loading" || (authState === "guest" && guestChatUsed)}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={onPromptKeyDown}
           placeholder="Например: как сбросить пароль?"
           aria-label="Вопрос"
         />
-        <button disabled={loading} type="submit">
-          {loading ? "Отправка..." : "Отправить"}
+        <button disabled={loading || authState === "loading" || (authState === "guest" && guestChatUsed)} type="submit">
+          {loading ? "Отправка..." : authState === "guest" && guestChatUsed ? "Недоступно" : "Отправить"}
         </button>
       </form>
 
